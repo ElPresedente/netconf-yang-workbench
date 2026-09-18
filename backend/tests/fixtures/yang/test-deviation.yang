@@ -1,0 +1,8 @@
+module test-deviation {
+  yang-version 1.1;
+  namespace "urn:test:deviation";
+  prefix td;
+  import test-system { prefix ts; }
+  revision 2026-09-16;
+  deviation "/ts:system/ts:interface/ts:mtu" { deviate not-supported; }
+}

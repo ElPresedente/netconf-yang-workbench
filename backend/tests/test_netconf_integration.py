@@ -1,0 +1,203 @@
+"""Local SSH/NETCONF device fixture. Exercises real ncclient base-1.1 framing."""
+import pytest
+import socket
+import threading
+from pathlib import Path
+from types import SimpleNamespace
+
+import paramiko
+from lxml import etree
+from ncclient.transport import SSHSession
+
+from netconf_backend.netconf.session import NetconfSession, BASE_11
+from netconf_backend.netconf.schema_fetcher import discover, YL
+from netconf_backend.yang.context import SchemaContext
+from netconf_backend.yang.repository import YangRepository
+
+BASE = "urn:ietf:params:xml:ns:netconf:base:1.0"
+MON = "urn:ietf:params:xml:ns:yang:ietf-netconf-monitoring"
+FIXTURES = Path(__file__).parent / 'fixtures' / 'yang'
+
+
+class SSHServer(paramiko.ServerInterface):
+    def check_auth_password(self, username, password):
+        return paramiko.AUTH_SUCCESSFUL
+
+    def get_allowed_auths(self, username):
+        return 'password'
+
+    def check_channel_request(self, kind, chanid):
+        return paramiko.OPEN_SUCCEEDED if kind == 'session' else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+
+    def check_channel_subsystem_request(self, channel, name):
+        return name == 'netconf'
+
+
+class Device:
+    def __init__(self, version='1.1', with_defaults=False):
+        self.with_defaults = with_defaults
+        self.version = version
+        self.payloads = []
+        self.key = paramiko.RSAKey.generate(2048)
+        self.listener = socket.socket()
+        self.listener.bind(('127.0.0.1', 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.requests = []
+        self.client_caps = []
+        self.errors = []
+        self.transport = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        try:
+            connection, _ = self.listener.accept()
+            self.transport = paramiko.Transport(connection)
+            self.transport.add_server_key(self.key)
+            self.transport.start_server(server=SSHServer())
+            channel = self.transport.accept(10)
+            channel.settimeout(10)
+            stream = channel.makefile('rb')
+            hello = b''
+            while not hello.endswith(b']]>]]>'):
+                chunk = stream.read(1)
+                if not chunk:
+                    return
+                hello += chunk
+            self.client_caps = etree.fromstring(hello[:-6]).xpath('//*[local-name()="capability"]/text()')
+            server_hello = f'<hello xmlns="{BASE}"><capabilities><capability>urn:ietf:params:netconf:base:{self.version}</capability><capability>urn:ietf:params:netconf:capability:yang-library:1.1?revision=2019-01-04&amp;content-id=test</capability><capability>{MON}</capability></capabilities><session-id>42</session-id></hello>]]>]]>'
+            if self.with_defaults:
+                server_hello = server_hello.replace('</capabilities>', '<capability>urn:ietf:params:netconf:capability:with-defaults:1.0?basic-mode=explicit&amp;also-supported=trim,report-all</capability></capabilities>')
+            channel.sendall(server_hello.encode())
+            while True:
+                message = b''
+                if self.version == '1.0':
+                    while not message.endswith(b']]>]]>'):
+                        chunk = stream.read(1)
+                        if not chunk:
+                            return
+                        message += chunk
+                    message = message[:-6]
+                else:
+                    while True:
+                        line = stream.readline()
+                        if not line:
+                            return
+                        if line == b'\n':
+                            continue
+                        if line == b'##\n':
+                            break
+                        assert line.startswith(b'#'), line
+                        message += stream.read(int(line[1:]))
+                self.payloads.append(message)
+                rpc = etree.fromstring(message)
+                operation = etree.QName(rpc[0]).localname
+                self.requests.append(operation)
+                reply = etree.Element(f'{{{BASE}}}rpc-reply', attrib={'message-id': rpc.get('message-id')}, nsmap={None: BASE})
+                if operation == 'get':
+                    data = etree.SubElement(reply, f'{{{BASE}}}data')
+                    if rpc[0].findtext('.//{urn:test:system}name') == 'parse-failure':
+                        etree.SubElement(data, '{urn:unknown:fixture}unknown').text = 'unmodeled response'
+                    elif rpc[0].find('.//{urn:test:system}system') is not None:
+                        system = etree.SubElement(data, '{urn:test:system}system')
+                        interface = etree.SubElement(system, '{urn:test:system}interface')
+                        etree.SubElement(interface, '{urn:test:system}name').text = 'eth1/1'
+                        etree.SubElement(interface, '{urn:test:augment}description').text = 'Fixture uplink'
+                    else:
+                        library = etree.SubElement(data, f'{{{YL}}}yang-library')
+                        module_set = etree.SubElement(library, f'{{{YL}}}module-set')
+                        etree.SubElement(module_set, f'{{{YL}}}name').text = 'running'
+                        for name, revision in [('test-system', '2026-09-14'), ('test-augment', '2026-09-15')]:
+                            mod = etree.SubElement(module_set, f'{{{YL}}}module')
+                            etree.SubElement(mod, f'{{{YL}}}name').text = name
+                            etree.SubElement(mod, f'{{{YL}}}revision').text = revision
+                elif operation == 'get-config':
+                    error = etree.SubElement(reply, f'{{{BASE}}}rpc-error')
+                    for name, value in [('error-type', 'application'), ('error-tag', 'operation-failed'), ('error-severity', 'error'), ('error-app-tag', 'fixture'), ('error-path', '/system'), ('error-message', 'Fixture denied read'), ('error-info', 'details')]:
+                        etree.SubElement(error, f'{{{BASE}}}{name}').text = value
+                elif operation == 'get-schema':
+                    name = rpc[0].findtext(f'{{{MON}}}identifier')
+                    etree.SubElement(reply, f'{{{MON}}}data').text = (FIXTURES / f'{name}.yang').read_text()
+                elif operation == 'close-session':
+                    etree.SubElement(reply, f'{{{BASE}}}ok')
+                else:
+                    raise AssertionError(f'Unexpected RPC {operation}')
+                payload = etree.tostring(reply)
+                channel.sendall(payload + b']]>]]>' if self.version == '1.0' else b'\n#' + str(len(payload)).encode() + b'\n' + payload + b'\n##\n')
+                if operation == 'close-session':
+                    return
+        except Exception as exc:
+            self.errors.append(exc)
+        finally:
+            if self.transport:
+                self.transport.close()
+
+    def close(self):
+        if self.transport:
+            self.transport.close()
+        self.listener.close()
+        self.thread.join(3)
+
+
+@pytest.mark.parametrize('with_defaults', [False, True])
+@pytest.mark.parametrize('version', ['1.0', '1.1'])
+def test_real_ssh_discover_download_compile_disconnect(tmp_path, version, with_defaults):
+    device = Device(version, with_defaults)
+    events = []
+
+    class TrustedTestTransport(SSHSession):
+        def connect(self, **kwargs):
+            # Trust only this ephemeral fixture key, retaining host-key checking.
+            return super().connect(**kwargs, hostkey_b64=device.key.get_base64())
+
+    session = NetconfSession(lambda event, data: events.append((event, data)), transport_factory=TrustedTestTransport)
+    schema = SchemaContext()
+    try:
+        assert session.info()['state'] == 'disconnected'
+        assert not device.client_caps
+        info = session.connect({'host': '127.0.0.1', 'port': device.port, 'username': 'test', 'password': 'test-password'})
+        assert info['sessionId'] == '42'
+        assert BASE_11 in device.client_caps
+        assert 'urn:ietf:params:netconf:base:1.0' in device.client_caps
+        assert info['protocolVersion'] == version
+        assert not device.requests  # Connect never triggers schema loading.
+        specs = discover(session)
+        result = schema.compile(specs, YangRepository('127.0.0.1', device.port, tmp_path), session)
+        assert result['modulesDownloaded'] == 2
+        assert result['modulesLoaded'] == 2
+        assert [node['name'] for node in schema.tree['roots']] == ['system']
+        system = next(n for n in schema.tree['roots'] if n['name'] == 'system')
+        assert any(n['name'] == 'enabled' for n in system['children'])
+        interface = next(n for n in system['children'] if n['name'] == 'interface')
+        assert any(n['name'] == 'description' and n['namespace'] == 'urn:test:augment' for n in interface['children'])
+        from netconf_backend.main import Backend
+        backend = Backend(session.emit, session=session, schema=schema)
+        intent = {'operation': 'get', 'datastore': None, 'selectedPaths': [interface['children'][0]['path']], 'listKeyValues': {interface['path']: {'name': 'eth1/1'}}}
+        intent['withDefaults'] = 'trim' if with_defaults else None
+        before = list(device.requests)
+        preview = backend.dispatch('request.preview', intent)
+        assert device.requests == before
+        response = backend.dispatch('request.execute', intent)
+        assert 'rpc-reply' in response['xml']
+        assert response['dataNodes'][0]['children'][0]['keyValues'] == {'name': 'eth1/1'}
+        sent = etree.fromstring(device.payloads[-1])[0]
+        def semantic(node):
+            return (node.tag, dict(node.attrib), node.text if node.text and node.text.strip() else None, [semantic(c) for c in node])
+        assert semantic(sent) == semantic(etree.fromstring(preview['xml'].encode()))
+        result = backend.dispatch('request.execute', {**intent, 'operation': 'get-config', 'datastore': 'running'})
+        sent_config = etree.fromstring(device.payloads[-1])[0]
+        wd = sent_config.find('{urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults}with-defaults')
+        assert (wd.text if wd is not None else None) == intent['withDefaults']
+        assert result['errors'][0]['error-app-tag'] == 'fixture'
+        assert 'error-info' in result['errors'][0]
+        assert session.info()['sessionId'] == info['sessionId']
+        session.disconnect()
+        assert device.requests == ['get', 'get-schema', 'get-schema', 'get', 'get-config', 'close-session']
+        assert session.info()['state'] == 'disconnected'
+        assert 'test-password' not in str(events)
+        assert not device.errors
+    finally:
+        session.disconnect()
+        schema.clear()
+        device.close()

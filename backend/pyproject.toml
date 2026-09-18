@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netconf-client-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["ncclient==0.7.1", "paramiko>=3.2,<5", "libyang==5.0.0", "platformdirs>=4,<5"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+netconf-backend = "netconf_backend.main:main"
+
+[tool.setuptools.packages.find]
+include = ["netconf_backend*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

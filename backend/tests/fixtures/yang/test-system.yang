@@ -1,0 +1,23 @@
+module test-system {
+  yang-version 1.1;
+  namespace "urn:test:system";
+  prefix ts;
+  revision 2026-09-14;
+  feature advanced;
+  grouping common-settings {
+    leaf enabled { type boolean; default true; }
+  }
+  container system {
+    uses common-settings;
+    leaf hostname { type string; mandatory true; }
+    leaf advanced-setting { if-feature advanced; type string; }
+    leaf-list dns { type string; }
+    container service { presence "Enable service"; leaf port { type uint16; default 830; } }
+    list interface {
+      key "name";
+      leaf name { type string; }
+      leaf mtu { type uint16; }
+      leaf statistics { config false; type uint64; }
+    }
+  }
+}

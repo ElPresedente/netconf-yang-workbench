@@ -1,0 +1,10 @@
+module test-augment {
+  yang-version 1.1;
+  namespace "urn:test:augment";
+  prefix ta;
+  import test-system { prefix ts; revision-date 2026-09-14; }
+  revision 2026-09-15;
+  augment "/ts:system/ts:interface" {
+    leaf description { type string; }
+  }
+}
