@@ -18,7 +18,7 @@ class BackendError(Exception):
 
 
 METHODS = {"connect", "disconnect", "connection.getState", "schema.fetch",
-           "schema.getModules", "schema.getTree", "shutdown", "request.preview", "request.execute"}
+           "schema.getModules", "schema.getTree", "shutdown", "request.preview", "request.execute", "edit.preview", "edit.execute", "candidate.commit", "candidate.discard"}
 
 
 def parse_request(line: str) -> dict:
@@ -44,7 +44,7 @@ def parse_request(line: str) -> dict:
             raise BackendError("invalid_request", "Port must be between 1 and 65535")
         if params.get("authMode", "password") != "password":
             raise BackendError("invalid_request", "Only password authentication is supported")
-    elif req["method"] in ("request.preview", "request.execute"):
+    elif req["method"] in ("request.preview", "request.execute", "edit.preview", "edit.execute"):
         pass  # Validated against the current compiled snapshot by build_request.
     elif params:
         raise BackendError("invalid_request", "This command does not accept parameters")

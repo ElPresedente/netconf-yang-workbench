@@ -14,7 +14,7 @@ from test_netconf_integration import Device
 
 
 def main():
-    device = Device()
+    device = Device(edit=True)
     report = Path(os.environ['NETCONF_TEST_REPORT'])
     report.write_text(json.dumps({'port': device.port}))
 

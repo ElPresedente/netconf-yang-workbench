@@ -1,18 +1,29 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, unwrap } from './api/netconf-api';
-import type { DataNode, BackendStatus, ConnectionInfo, ConnectionParams, LogEntry, SchemaNode, SchemaProgress, YangModuleInfo } from '../../shared/types';
+import type { DataNode, RetrievalProvenance, BackendStatus, ConnectionInfo, ConnectionParams, LogEntry, SchemaNode, SchemaProgress, YangModuleInfo } from '../../shared/types';
 import { ConnectionForm } from './features/connection/ConnectionForm';
 import { SchemaView } from './features/schema/SchemaView';
 import { RequestBuilder } from './features/requests/RequestBuilder';
+import { toChanges, type DraftNode } from './features/edits/tree';
+import { afterCandidate, afterEdit, editCapabilities, emptyEdit } from './features/edits/state';
 import { emptyRequest, relevantLists } from './features/requests/state';
 import { Group, Panel, Separator, usePanelRef, type Layout } from 'react-resizable-panels';
 import { readPreference, usePreference, writePreference } from './features/workbench/preferences';
 import { LogView } from './features/logs/LogView';
 
 export default function App() {
+  const [editOptions, setEditOptions] = useState(emptyEdit);
+  const [draftTree, setDraftTree] = useState<DraftNode[]>([]);
+  const draft = useMemo(() => ({ ...editOptions, changes: toChanges(draftTree) }), [editOptions, draftTree]);
+  const setDraft = (value: ReturnType<typeof emptyEdit>) => { setEditOptions(value); if (!value.changes.length) setDraftTree([]); };
+  const [candidateModified, setCandidateModified] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [retrievalXml, setRetrievalXml] = useState('');
+  const [provenance, setProvenance] = useState<RetrievalProvenance | null>(null);
   const [dataNodes, setDataNodes] = useState<DataNode[] | null>(null);
   const [outputTab, setOutputTab] = usePreference<'preview' | 'response' | 'logs'>('outputTab', 'preview');
   const [dockOpen, setDockOpen] = usePreference('dockOpen', true);
+  const [editToolbarTarget, setEditToolbarTarget] = useState<HTMLDivElement | null>(null);
   const [previewTarget, setPreviewTarget] = useState<HTMLDivElement | null>(null);
   const [responseTarget, setResponseTarget] = useState<HTMLDivElement | null>(null);
   const outputPanel = usePanelRef();
@@ -41,6 +52,10 @@ export default function App() {
   const inFlight = useRef(false);
   const capabilityKey = JSON.stringify([...new Set(info.capabilities)].sort());
   useEffect(() => {
+    if (info.state === 'connected') {
+      const caps = editCapabilities(info.capabilities);
+      setEditOptions(old => ({ ...old, target: caps.editableTargets.includes(old.target) ? old.target : caps.editableTargets[0] || 'candidate', testOption: null, errorOption: null }));
+    }
     setIntent(old => old.withDefaults == null ? old : { ...old, withDefaults: null });
   }, [capabilityKey, info.sessionId, info.state]);
 
@@ -75,7 +90,8 @@ export default function App() {
     finally { inFlight.current = false; setBusy(false); }
   }
   const connect = async (params: ConnectionParams) => operation(async () => {
-    setDataNodes(null); setIntent(emptyRequest()); setModules([]); setRoots([]); setGeneration(g => g + 1); setProgress(null);
+    setCandidateModified(false);
+    setDataNodes(null); setProvenance(null); setRetrievalXml(''); setDraft({ ...emptyEdit(), target: editCapabilities(info.capabilities).editableTargets[0] || 'candidate' }); setEditMode(false); setIntent(emptyRequest()); setModules([]); setRoots([]); setGeneration(g => g + 1); setProgress(null);
     unwrap(await api.connect(params));
     // Events own the state; a late response must not overwrite transport loss.
   });
@@ -85,7 +101,7 @@ export default function App() {
       unwrap(await api.fetchSchemas());
       const loadedModules = unwrap(await api.getModules());
       const tree = unwrap(await api.getSchemaTree());
-      setDataNodes(null); setIntent(emptyRequest()); setModules(loadedModules); setRoots(tree.roots); setGeneration(g => g + 1);
+      setDataNodes(null); setProvenance(null); setRetrievalXml(''); setDraft({ ...emptyEdit(), target: editCapabilities(info.capabilities).editableTargets[0] || 'candidate' }); setEditMode(false); setIntent(emptyRequest()); setModules(loadedModules); setRoots(tree.roots); setGeneration(g => g + 1);
     } finally { setLoading(false); }
   });
   return <main>
@@ -97,10 +113,10 @@ export default function App() {
       {loading && <span>Disconnect available after loading finishes.</span>}
     </div>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
-    <RequestBuilder key={`request-${generation}`} intent={intent} setIntent={setIntent} roots={roots} info={info} busy={busy} run={operation} previewTarget={previewTarget} responseTarget={responseTarget} onExecute={() => { setOutputTab('response'); setDockOpen(true); }} onResponse={response => { if (response.dataNodes !== undefined) setDataNodes(response.dataNodes); }} />
+    <RequestBuilder editToolbarTarget={editToolbarTarget} editMode={editMode} setEditMode={setEditMode} draft={draft} setDraft={setEditOptions} clearDraft={() => setDraftTree([])} hasDraft={draftTree.length > 0} candidateModified={candidateModified} onCandidateAttempt={(action, success) => { setProvenance(old => afterCandidate(old, action)); if (success) setCandidateModified(false); }} onEditAttempt={(edit, success) => { setProvenance(old => afterEdit(old, edit)); if (success && edit.target === 'candidate' && edit.testOption !== 'test-only') setCandidateModified(true); }} key={`request-${generation}`} intent={intent} setIntent={setIntent} roots={roots} info={info} busy={busy} run={operation} previewTarget={previewTarget} responseTarget={responseTarget} onExecute={() => { setOutputTab('response'); setDockOpen(true); }} onResponse={response => { if (response.dataNodes !== undefined) { setDataNodes(response.dataNodes); setRetrievalXml(response.rawXml); setProvenance({ operation: intent.operation, datastore: intent.datastore, stale: false }); } }} />
     <Group className="workbench" orientation="vertical" defaultLayout={readPreference<Layout | undefined>('vertical', undefined)} onLayoutChanged={layout => { if (dockOpen && layout.output > 10) writePreference('vertical', layout); }}>
       <Panel id="workspace" minSize="12%">
-    <SchemaView key={`schema-${generation}`} dataNodes={dataNodes} modules={modules} roots={roots} paths={intent.selectedPaths} disabled={busy} toggle={node => {
+    <SchemaView setEditToolbarTarget={setEditToolbarTarget} draftTree={draftTree} setDraftTree={setDraftTree} activateEdit={() => setEditMode(true)} retrievalXml={retrievalXml} draft={draft} editMode={editMode} provenance={provenance} key={`schema-${generation}`} dataNodes={dataNodes} modules={modules} roots={roots} paths={intent.selectedPaths} disabled={busy} toggle={node => {
       const descendants = new Set<string>();
       const collect = (n: SchemaNode) => { descendants.add(n.path); n.children.forEach(collect); }; collect(node);
       const selectedPaths = intent.selectedPaths.filter(p => !descendants.has(p));

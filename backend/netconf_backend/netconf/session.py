@@ -173,10 +173,45 @@ class NetconfSession:
             if operation == 'get-config':
                 kwargs['source'] = datastore
             reply = self._rpc('get' if operation == 'get' else 'get_config', **kwargs)
-            raw = reply.xml
-            root = etree.fromstring(raw.encode(), etree.XMLParser(resolve_entities=False, no_network=True))
-            errors = [{etree.QName(c).localname: (etree.tostring(c, encoding='unicode') if etree.QName(c).localname == 'error-info' else ''.join(c.itertext())) for c in error}
-                      for error in root.findall('{urn:ietf:params:xml:ns:netconf:base:1.0}rpc-error')]
-            return {"xml": etree.tostring(root, encoding='unicode', pretty_print=True), "rawXml": raw, "errors": errors}
+            return self._reply_result(reply)
+        finally:
+            manager.raise_mode = previous
+
+    @staticmethod
+    def _reply_result(reply):
+        raw = reply.xml
+        root = etree.fromstring(raw.encode(), etree.XMLParser(resolve_entities=False, no_network=True))
+        errors = [{etree.QName(c).localname: (etree.tostring(c, encoding='unicode') if etree.QName(c).localname == 'error-info' else ''.join(c.itertext())) for c in error}
+                  for error in root.findall('{urn:ietf:params:xml:ns:netconf:base:1.0}rpc-error')]
+        return {"xml": etree.tostring(root, encoding='unicode', pretty_print=True), "rawXml": raw, "errors": errors}
+
+    def execute_edit(self, params, config, preview):
+        manager = self.require_connected()
+        self.log("Edit draft: edit-config", direction="tx", payload=preview)
+        previous = manager.raise_mode
+        try:
+            manager.raise_mode = RaiseMode.NONE
+            kwargs = {"target": params["target"], "config": config}
+            for field, argument in [("defaultOperation", "default_operation"), ("testOption", "test_option"), ("errorOption", "error_option")]:
+                if params.get(field) is not None:
+                    kwargs[argument] = params[field]
+            return self._reply_result(self._rpc('edit_config', **kwargs))
+        finally:
+            manager.raise_mode = previous
+
+    def execute_candidate(self, action):
+        manager = self.require_connected()
+        if action not in ('commit', 'discard'):
+            raise BackendError('invalid_request', 'Unknown candidate action')
+        capabilities = {str(c).split('?', 1)[0] for c in manager.server_capabilities}
+        if 'urn:ietf:params:netconf:capability:candidate:1.0' not in capabilities:
+            raise BackendError('invalid_request', 'Candidate actions require :candidate')
+        method = 'commit' if action == 'commit' else 'discard_changes'
+        self.log('Candidate: ' + ('commit' if action == 'commit' else 'discard-changes'), direction='tx')
+        previous = manager.raise_mode
+        try:
+            manager.raise_mode = RaiseMode.NONE
+            # Public ncclient APIs own the RPC envelope and use the existing manager.
+            return self._reply_result(self._rpc(method))
         finally:
             manager.raise_mode = previous

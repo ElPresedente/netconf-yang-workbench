@@ -3,3 +3,30 @@ select{font:inherit;background:#11151b;color:#e1e6ef;padding:5px;border:1px soli
 main{overflow:auto}.schema-layout{min-height:200px}.request-output{height:22vh}.logs{height:12vh}.key-fields{max-height:80px}.key-fields label{flex-direction:row;align-items:center}.schema-tree summary::before{content:'▸';display:inline-block;width:14px;color:#95a4b9}.schema-tree details[open]>summary::before{content:'▾'}
 /* Workbench: fixed chrome, flexible tree, a single full-width output dock. */
 main{overflow:hidden}header{padding:6px 12px}.connection{padding:6px 12px;position:relative}.connection form{gap:8px;align-items:center}.connection form label{flex-direction:row;align-items:center;gap:6px;min-width:0}.connection form label:first-child{flex:1.2}.connection form .port{max-width:100px}.connection input,.connection select{padding:4px;min-width:0;width:100%}.connection button{white-space:nowrap;padding:5px 9px}.session-line{padding:6px 0 0;gap:18px;font-size:12px}.capabilities{position:absolute;right:12px;bottom:3px;background:#181c22;z-index:3}.capabilities[open]{top:100%;bottom:auto;max-width:75vw;padding:8px;border:1px solid #53627a;box-shadow:0 6px 20px #0008}.capabilities summary{cursor:pointer}.profile-editor{font-size:11px;margin-top:4px;color:#aab7ca}.profile-fields{display:flex;gap:10px;align-items:center;padding:8px 0}.profile-fields label{flex:0 1 220px}.profile-fields .remember{flex-direction:row;align-items:center;white-space:nowrap}.remember input{width:auto}.toolbar{padding:4px 12px;gap:10px}.request-controls{padding:5px 12px;gap:8px;align-items:center}.request-controls label{flex:0 1 auto;flex-direction:row;align-items:center;gap:6px;white-space:nowrap}.request-controls span{font-size:11px}.request-controls button{padding:5px 10px}.key-fields:empty{display:none}.key-fields{flex-shrink:0;max-height:75px}.workbench{flex:1;min-height:0}.schema-workspace{height:100%;display:flex;flex-direction:column;min-height:0}.workspace-tabs,.dock-header{display:flex;gap:6px;align-items:center;padding:4px 8px;background:#202630;flex-shrink:0}.workspace-tabs>button:last-child{margin-left:auto}.workspace-tabs button,.dock-header button{font-size:12px;padding:3px 10px}.workspace-tabs [role=tablist],.dock-header [role=tablist]{display:flex;gap:4px}.dock-header [role=tablist]{margin-right:auto}button[aria-selected=true]{background:#385577;border-color:#7aace3}.schema-layout{min-height:0;flex:1}.schema-layout .pane{height:100%;width:100%;border:0}.modules,.inspector{flex:initial}.schema-layout .modules input{margin:5px;width:calc(100% - 10px)}.splitter{background:#354052;position:relative;flex-shrink:0}.splitter:hover,.splitter:focus-visible{background:#7aace3}.splitter.horizontal{width:5px}.splitter.vertical{height:5px}.output-dock{display:flex;height:100%;flex-direction:column;min-height:0}.output-content{flex:1;min-height:0;overflow:hidden}.output-content[hidden]{display:none}.output-content>.pane{height:100%}.output-content pre{margin:0;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.output-content .logs{height:100%;min-height:0}.output-content h2{padding:5px 12px}.node-info{max-height:none}.pane h2{padding:6px 10px}footer{padding:2px 12px}.schema-tree{min-width:max-content}.profile-fields span{font-size:11px;color:#ddb977}@media(max-width:1100px){.connection form{flex-wrap:wrap}.connection form label{min-width:140px}.connection form .port{min-width:90px}.capabilities{position:static}.session-line{flex-wrap:wrap}.request-controls{flex-wrap:wrap}}
+/* Inspector and edit draft share the existing resizable pane. */
+.inspector-content{height:100%;overflow:auto}.schema-layout .inspector-content .inspector{height:auto;overflow:visible}.inspector-content .node-info{flex:none}.retrieval-xml{max-height:35%;overflow:auto;padding:6px 10px}.retrieval-xml pre{white-space:pre-wrap;overflow-wrap:anywhere}.request-controls{flex-wrap:wrap}
+
+/* Compact configuration authoring in the central workspace. */
+.palette-action { display: inline-flex; vertical-align: middle; gap: 3px; margin-left: 8px; }
+.palette-action button, button.palette-action, .palette-action select { padding: 1px 5px; font-size: 11px; }
+.draft-guidance { color: #94a3b8; font-size: 12px; margin: 8px; }
+.draft-tree, .draft-tree ul { list-style: none; padding-left: 20px; margin: 0; }
+.draft-tree { padding: 6px; min-width: max-content; }
+.draft-tree ul { border-left: 1px solid #334155; margin-left: 8px; }
+.draft-row { display: flex; align-items: center; gap: 7px; min-height: 32px; padding: 2px 5px; }
+.draft-row input:not([type=checkbox]) { width: 190px; padding: 3px 6px; }
+.draft-row input[readonly] { color: #94a3b8; background: transparent; border-color: transparent; }
+.draft-row select, .draft-row button, .draft-add button { padding: 2px 6px; }
+.draft-original { color: #94a3b8; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-modified { background: #173042; border-left: 2px solid #38bdf8; }
+.draft-destructive { color: #fca5a5; background: #391e28; }
+.draft-add { padding: 4px 6px; }
+.field-picker { display: flex; flex-wrap: wrap; gap: 5px; max-width: 650px; padding: 8px; border: 1px solid #475569; }
+.field-picker input { width: 100%; }
+.draft-summary { margin: 12px; font-size: 12px; }
+
+.draft-toolbar { flex-shrink: 0; border-bottom: 1px solid #354052; }
+.draft-toolbar .request-controls { padding: 5px 8px; gap: 6px; }
+.draft-toolbar select { max-width: 170px; }
+.draft-row label { flex: none; flex-direction: row; align-items: center; }
+.draft-row input[type=checkbox] { width: auto; }

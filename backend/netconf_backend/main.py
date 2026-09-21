@@ -33,6 +33,18 @@ class Backend:
             result = self.schema.compile(inventory, repository, self.session)
             self.session.log(f"Loaded {result['modulesLoaded']} compiled modules")
             return result
+        if method in ("candidate.commit", "candidate.discard"):
+            if params:
+                raise BackendError("invalid_request", "This command does not accept parameters")
+            return self.session.execute_candidate(method.split('.')[1])
+        if method in ("edit.preview", "edit.execute"):
+            from .edits import build_edit
+            from .requests import display_xml
+            payload, config = build_edit(self.schema, params, self.session.info()["capabilities"])
+            preview = display_xml(payload)
+            if method == "edit.preview":
+                return {"xml": preview}
+            return self.session.execute_edit(params, config, preview)
         if method in ("request.preview", "request.execute"):
             from .requests import build_request, display_xml
             payload, subtree = build_request(self.schema, params, self.session.info()["capabilities"])

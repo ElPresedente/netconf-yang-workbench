@@ -34,7 +34,9 @@ class SSHServer(paramiko.ServerInterface):
 
 
 class Device:
-    def __init__(self, version='1.1', with_defaults=False):
+    def __init__(self, version='1.1', with_defaults=False, edit=False):
+        self.candidate_errors = False
+        self.edit = edit
         self.with_defaults = with_defaults
         self.version = version
         self.payloads = []
@@ -69,6 +71,8 @@ class Device:
             server_hello = f'<hello xmlns="{BASE}"><capabilities><capability>urn:ietf:params:netconf:base:{self.version}</capability><capability>urn:ietf:params:netconf:capability:yang-library:1.1?revision=2019-01-04&amp;content-id=test</capability><capability>{MON}</capability></capabilities><session-id>42</session-id></hello>]]>]]>'
             if self.with_defaults:
                 server_hello = server_hello.replace('</capabilities>', '<capability>urn:ietf:params:netconf:capability:with-defaults:1.0?basic-mode=explicit&amp;also-supported=trim,report-all</capability></capabilities>')
+            if self.edit:
+                server_hello = server_hello.replace('</capabilities>', ''.join(f'<capability>urn:ietf:params:netconf:capability:{cap}</capability>' for cap in ['candidate:1.0', 'writable-running:1.0', 'validate:1.1', 'rollback-on-error:1.0']) + '</capabilities>')
             channel.sendall(server_hello.encode())
             while True:
                 message = b''
@@ -112,6 +116,29 @@ class Device:
                             mod = etree.SubElement(module_set, f'{{{YL}}}module')
                             etree.SubElement(mod, f'{{{YL}}}name').text = name
                             etree.SubElement(mod, f'{{{YL}}}revision').text = revision
+                elif operation in ('commit', 'discard-changes'):
+                    if self.candidate_errors:
+                        for tag in ['operation-failed', 'access-denied']:
+                            error = etree.SubElement(reply, f'{{{BASE}}}rpc-error')
+                            for name, value in [('error-type', 'application'), ('error-tag', tag), ('error-severity', 'error'), ('error-message', 'Fixture denied candidate action')]:
+                                etree.SubElement(error, f'{{{BASE}}}{name}').text = value
+                    else:
+                        etree.SubElement(reply, f'{{{BASE}}}ok')
+                elif operation == 'edit-config':
+                    if rpc[0].findtext('.//{urn:test:system}mtu') == 'error':
+                        for tag in ['invalid-value', 'operation-failed']:
+                            error = etree.SubElement(reply, f'{{{BASE}}}rpc-error')
+                            for name, value in [('error-type', 'application'), ('error-tag', tag), ('error-severity', 'error'), ('error-app-tag', 'edit-fixture'), ('error-path', '/system/interface/mtu'), ('error-message', 'Fixture denied edit'), ('error-info', 'details')]:
+                                etree.SubElement(error, f'{{{BASE}}}{name}').text = value
+                    else:
+                        etree.SubElement(reply, f'{{{BASE}}}ok')
+                elif operation == 'get-config' and self.edit and rpc[0].find(f'{{{BASE}}}source/{{{BASE}}}candidate') is not None:
+                    data = etree.SubElement(reply, f'{{{BASE}}}data')
+                    system = etree.SubElement(data, '{urn:test:system}system')
+                    interface = etree.SubElement(system, '{urn:test:system}interface')
+                    etree.SubElement(interface, '{urn:test:system}name').text = 'eth1/1'
+                    etree.SubElement(interface, '{urn:test:system}mtu').text = '1500'
+                    etree.SubElement(interface, '{urn:test:augment}description').text = 'Fixture uplink'
                 elif operation == 'get-config':
                     error = etree.SubElement(reply, f'{{{BASE}}}rpc-error')
                     for name, value in [('error-type', 'application'), ('error-tag', 'operation-failed'), ('error-severity', 'error'), ('error-app-tag', 'fixture'), ('error-path', '/system'), ('error-message', 'Fixture denied read'), ('error-info', 'details')]:
@@ -200,4 +227,86 @@ def test_real_ssh_discover_download_compile_disconnect(tmp_path, version, with_d
     finally:
         session.disconnect()
         schema.clear()
+        device.close()
+
+
+@pytest.mark.parametrize('version', ['1.0', '1.1'])
+def test_edit_real_session(tmp_path, version):
+    from netconf_backend.main import Backend
+    from test_edits import intent, change
+    device = Device(version, edit=True)
+    connects = []
+    class TrustedTransport(SSHSession):
+        def connect(self, **kwargs):
+            connects.append(1)
+            return super().connect(**kwargs, hostkey_b64=device.key.get_base64())
+    session = NetconfSession(lambda *args: None, transport_factory=TrustedTransport)
+    schema = SchemaContext()
+    try:
+        session.connect({'host': '127.0.0.1', 'port': device.port, 'username': 'test', 'password': 'test'})
+        schema.compile(discover(session), YangRepository('127.0.0.1', device.port, tmp_path), session)
+        backend = Backend(session.emit, session=session, schema=schema)
+        manager = session.require_connected()
+        for target in ['candidate', 'running']:
+            for test in [None, 'set', 'test-then-set', 'test-only']:
+                params = {**intent(change(), testOption=test, errorOption='rollback-on-error'), 'target': target}
+                before = device.requests[:]
+                preview = backend.dispatch('edit.preview', params)
+                assert device.requests == before
+                reply = backend.dispatch('edit.execute', params)
+                assert not reply['errors'] and '<ok' in reply['rawXml']
+                assert device.requests == before + ['edit-config']
+                def semantic(node):
+                    return node.tag, dict(node.attrib), (node.text or '').strip(), [semantic(c) for c in node]
+                assert semantic(etree.fromstring(device.payloads[-1])[0]) == semantic(etree.fromstring(preview['xml'].encode()))
+                assert session.require_connected() is manager
+        result = backend.dispatch('edit.execute', intent(change(value='error')))
+        assert len(result['errors']) == 2
+        assert all(len(error) == 7 for error in result['errors'])
+        assert [e['error-tag'] for e in result['errors']] == ['invalid-value', 'operation-failed']
+        assert result['rawXml'].count('<rpc-error>') == 2
+        assert connects == [1]
+        assert 'commit' not in device.requests
+        session.disconnect()
+        assert not device.errors
+    finally:
+        session.disconnect()
+        schema.clear()
+        device.close()
+
+
+@pytest.mark.parametrize('version', ['1.0', '1.1'])
+def test_candidate_real_session_without_schema(version):
+    from netconf_backend.main import Backend
+    device = Device(version, edit=True)
+    connects = []
+    class TrustedTransport(SSHSession):
+        def connect(self, **kwargs):
+            connects.append(1)
+            return super().connect(**kwargs, hostkey_b64=device.key.get_base64())
+    session = NetconfSession(lambda *args: None, transport_factory=TrustedTransport)
+    backend = Backend(session.emit, session=session)
+    try:
+        session.connect({'host': '127.0.0.1', 'port': device.port, 'username': 'test', 'password': 'test'})
+        manager = session.require_connected()
+        assert device.requests == []
+        for errors in [False, True]:
+            device.candidate_errors = errors
+            for action, wire in [('commit', 'commit'), ('discard', 'discard-changes')]:
+                before = device.requests[:]
+                reply = backend.dispatch('candidate.' + action, {})
+                assert len(reply['errors']) == (2 if errors else 0)
+                assert reply['rawXml'].count('<rpc-error>') == (2 if errors else 0)
+                assert device.requests == before + [wire]
+                rpc = etree.fromstring(device.payloads[-1])
+                assert rpc[0].tag == f'{{{BASE}}}{wire}'
+                assert len(rpc[0]) == 0  # No confirmed-commit or other arguments.
+                assert session.require_connected() is manager
+        session.disconnect()
+        assert device.requests == ['commit', 'discard-changes', 'commit', 'discard-changes', 'close-session']
+        assert connects == [1]
+        assert not device.errors
+    finally:
+        session.disconnect()
+        backend.schema.clear()
         device.close()

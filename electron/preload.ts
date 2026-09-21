@@ -7,6 +7,10 @@ function subscribe<T>(name: string, callback: (value: T) => void): () => void {
   return () => ipcRenderer.removeListener(`netconf:${name}`, listener);
 }
 const api: NetconfAPI = {
+  commitCandidate: () => ipcRenderer.invoke('netconf:commitCandidate'),
+  discardCandidate: () => ipcRenderer.invoke('netconf:discardCandidate'),
+  previewEdit: params => ipcRenderer.invoke('netconf:previewEdit', params),
+  executeEdit: params => ipcRenderer.invoke('netconf:executeEdit', params),
   getProfiles: () => ipcRenderer.invoke('netconf:getProfiles'),
   saveProfile: params => ipcRenderer.invoke('netconf:saveProfile', params),
   selectProfile: id => ipcRenderer.invoke('netconf:selectProfile', id),

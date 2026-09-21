@@ -25,7 +25,12 @@ export interface LogEntry {
 }
 export interface SchemaProgress { current: number; total: number; module: string }
 export interface BackendStatus { ready: boolean; error?: string }
+export type CandidateAction = 'commit' | 'discard';
 export interface NetconfAPI {
+  commitCandidate(): Promise<Result<RequestResponse>>;
+  discardCandidate(): Promise<Result<RequestResponse>>;
+  previewEdit(params: EditIntent): Promise<Result<{ xml: string }>>;
+  executeEdit(params: EditIntent): Promise<Result<RequestResponse>>;
   getProfiles(): Promise<Result<ProfileState>>;
   saveProfile(profile: ProfileSave): Promise<Result<ProfileState>>;
   selectProfile(id: string | null): Promise<Result<ProfileState>>;
@@ -68,3 +73,18 @@ export interface ProfileSave {
   id?: string; displayName: string; host: string; port: number; username: string;
   auth: { type: 'password' }; rememberPassword: boolean; password?: string;
 }
+
+export type EditOperation = 'merge' | 'replace' | 'create' | 'delete' | 'remove';
+export interface EditChange {
+  id: string; schemaPath: string; operation: EditOperation;
+  ancestorKeys: { listSchemaPath: string; values: Record<string, string> }[];
+  value?: string | null; source: 'schema' | 'runtime'; type: string | null;
+  instancePath?: string; currentValue?: string | null;
+}
+export interface EditIntent {
+  target: 'candidate' | 'running'; defaultOperation: 'merge' | 'replace' | 'none' | null;
+  testOption: 'test-then-set' | 'set' | 'test-only' | null;
+  errorOption: 'stop-on-error' | 'continue-on-error' | 'rollback-on-error' | null;
+  changes: EditChange[];
+}
+export interface RetrievalProvenance { operation: RequestIntent['operation']; datastore: Datastore | null; stale: boolean }
