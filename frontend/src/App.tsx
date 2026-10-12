@@ -105,7 +105,11 @@ export default function App() {
     } finally { setLoading(false); }
   });
   return <main>
-    <header><h1>netconf-client</h1><span>NETCONF / YANG workbench</span><span className="backend-status">{backend.ready ? 'Backend ready' : 'Backend unavailable'}</span></header>
+    <header>
+          <div className="brand"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16" /></svg></span><h1>netconf-client</h1></div>
+          <span>NETCONF / YANG workbench</span>
+          <span className={`backend-status ${backend.ready ? 'ready' : 'unavailable'}`} role="status">{backend.ready ? 'Backend ready' : 'Backend unavailable'}</span>
+        </header>
     {backend.error && <div role="alert" className="error">{backend.error}</div>}
     <ConnectionForm info={info} ready={backend.ready} busy={busy} connect={connect} disconnect={() => void operation(async () => { unwrap(await api.disconnect()); })} />
     <div className="toolbar"><button disabled={!backend.ready || busy || info.state !== 'connected'} onClick={() => void fetchSchemas()}>{loading ? 'Loading schemas…' : 'Load YANG models'}</button>

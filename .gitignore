@@ -1,0 +1,41 @@
+# Node.js / Electron / Vite
+node_modules/
+/dist/
+*.tsbuildinfo
+.vite/
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+/backend/build/
+/backend/dist/
+
+# Test reports and coverage
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+playwright-report/
+test-results/
+
+# Local configuration, credentials and logs
+.env
+.env.*
+!.env.example
+!.env.sample
+device-profiles.json
+device-profiles.json.tmp
+*.log
+
+# Editor and OS files
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
