@@ -33,6 +33,22 @@ class Backend:
             result = self.schema.compile(inventory, repository, self.session)
             self.session.log(f"Loaded {result['modulesLoaded']} compiled modules")
             return result
+        if method in ('yangRpc.preview', 'yangRpc.execute'):
+            from .yang_rpc import build_rpc, parse_rpc_reply, VALIDATION
+            from .requests import display_xml
+            payload = build_rpc(self.schema, params)
+            preview = display_xml(payload)
+            if method == 'yangRpc.preview':
+                return {'xml': preview, 'validationNotice': VALIDATION}
+            result = self.session.execute_yang_rpc(payload)
+            result['validationNotice'] = VALIDATION
+            if not result['errors']:
+                try:
+                    result['rpcOutput'] = parse_rpc_reply(self.schema.context, payload, result['rawXml'])
+                except Exception as exc:
+                    result['parseWarning'] = 'RPC succeeded. Local YANG output parsing failed; inspect the raw XML response.'
+                    self.session.log(f'RPC output parsing failed ({type(exc).__name__}): {str(exc)[:2000]}', level='warning')
+            return result
         if method in ("candidate.commit", "candidate.discard"):
             if params:
                 raise BackendError("invalid_request", "This command does not accept parameters")

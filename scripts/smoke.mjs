@@ -315,6 +315,30 @@ if (process.platform !== 'win32') {
       await page.getByRole('button', { name: 'Clear draft', exact: true }).click();
     }
 
+    // Custom RPC selection/editing/preview are local; execution uses the active session.
+    await page.getByRole('tab', { name: 'RPC', exact: true }).click();
+    await page.getByLabel('Search RPCs', { exact: true }).fill('lldp');
+    await page.getByLabel('YANG RPC', { exact: true }).selectOption('/test-system:clear-lldp-counters');
+    await page.getByLabel('Add RPC input field', { exact: true }).selectOption('/test-system:clear-lldp-counters/input/total-neighbors-stat');
+    await page.getByLabel('RPC /test-system:clear-lldp-counters/input/total-neighbors-stat 1', { exact: true }).selectOption('false');
+    await page.getByLabel('Add RPC input field', { exact: true }).selectOption('/test-system:clear-lldp-counters/input/interface');
+    await page.getByLabel('RPC /test-system:clear-lldp-counters/input/interface 1', { exact: true }).fill('ETH1/1');
+    await page.getByRole('button', { name: 'Hide inspector', exact: true }).click();
+    await page.getByRole('button', { name: 'Show inspector', exact: true }).click();
+    assert.equal(await page.getByLabel('RPC /test-system:clear-lldp-counters/input/interface 1', { exact: true }).inputValue(), 'ETH1/1');
+    await page.getByRole('button', { name: 'Preview RPC', exact: true }).click();
+    await page.getByRole('button', { name: 'Execute RPC', exact: true }).waitFor();
+    await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(b => b.textContent === 'Execute RPC')?.disabled);
+    await page.getByRole('tab', { name: 'Preview', exact: true }).click();
+    await page.locator('.output-content:visible pre').filter({ hasText: '<total-neighbors-stat>false' }).waitFor();
+    assert.doesNotMatch(await page.locator('.output-content:visible pre').innerText(), /<input/);
+    await page.getByRole('button', { name: 'Execute RPC', exact: true }).click();
+    await page.locator('.output-content:visible pre').filter({ hasText: 'cleared' }).waitFor();
+    await page.getByRole('button', { name: /cleared uint32 = 2/ }).waitFor();
+    await page.getByRole('tab', { name: /Last response/ }).click();
+    assert.match(await page.getByRole('tab', { name: /Last response/ }).innerText(), /stale/);
+    assert.match(await page.locator('.output-content:visible pre').innerText(), /cleared/);
+
     // A successful schema replacement clears runtime instances.
     await page.getByRole('button', { name: 'Load YANG models' }).click();
     await page.getByRole('button', { name: 'Load YANG models' }).waitFor();
@@ -377,7 +401,7 @@ if (process.platform !== 'win32') {
     const result = JSON.parse(await readFile(report, 'utf8'));
     assert.ok(result.capabilities.includes('urn:ietf:params:netconf:base:1.1'));
     assert.ok(result.capabilities.includes('urn:ietf:params:netconf:base:1.0'));
-    assert.deepEqual(result.requests, ['get', 'get-schema', 'get-schema', 'get', 'get', 'get-config', 'edit-config', 'discard-changes', 'commit', 'get-config', 'edit-config', 'edit-config', 'edit-config', 'get-config', 'get', 'get-schema', 'get-schema', 'get', 'edit-config', 'get', 'close-session']);
+    assert.deepEqual(result.requests, ['get', 'get-schema', 'get-schema', 'get', 'get', 'get-config', 'edit-config', 'discard-changes', 'commit', 'get-config', 'edit-config', 'edit-config', 'edit-config', 'get-config', 'clear-lldp-counters', 'get', 'get-schema', 'get-schema', 'get', 'edit-config', 'get', 'close-session']);
     assert.deepEqual(result.errors, []);
     console.log('Full desktop flow passed: retrievals, edit staging, preview/execute, test-only, explicit commit/discard, candidate/running staleness, complete rpc-errors, draft lifecycle, explicit Disconnect.');
   } finally {

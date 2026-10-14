@@ -146,6 +146,20 @@ class Device:
                 elif operation == 'get-schema':
                     name = rpc[0].findtext(f'{{{MON}}}identifier')
                     etree.SubElement(reply, f'{{{MON}}}data').text = (FIXTURES / f'{name}.yang').read_text()
+                elif operation in ('ping', 'clear-lldp-counters', 'complex'):
+                    if getattr(self, 'rpc_errors', False):
+                        for tag in ['operation-failed', 'access-denied']:
+                            error = etree.SubElement(reply, f'{{{BASE}}}rpc-error')
+                            etree.SubElement(error, f'{{{BASE}}}error-tag').text = tag
+                    elif getattr(self, 'rpc_unexpected', False):
+                        etree.SubElement(reply, '{urn:unknown}unexpected')
+                    elif operation == 'complex':
+                        result = etree.SubElement(reply, '{urn:test:rpc}result')
+                        etree.SubElement(result, '{urn:test:rpc}count').text = '0'
+                    elif operation == 'clear-lldp-counters':
+                        etree.SubElement(reply, '{urn:test:system}cleared').text = '2'
+                    else:
+                        etree.SubElement(reply, f'{{{BASE}}}ok')
                 elif operation == 'close-session':
                     etree.SubElement(reply, f'{{{BASE}}}ok')
                 else:
@@ -310,3 +324,54 @@ def test_candidate_real_session_without_schema(version):
         session.disconnect()
         backend.schema.clear()
         device.close()
+
+
+@pytest.mark.parametrize('version', ['1.0', '1.1'])
+def test_yang_rpc_same_session(tmp_path, version):
+    from netconf_backend.main import Backend
+    from netconf_backend.netconf.schema_fetcher import ModuleSpec
+    from test_yang_rpc import intent
+    device = Device(version)
+    class TrustedTransport(SSHSession):
+        def connect(self, **kwargs):
+            return super().connect(**kwargs, hostkey_b64=device.key.get_base64())
+    session = NetconfSession(lambda *args: None, transport_factory=TrustedTransport)
+    schema = SchemaContext()
+    backend = Backend(session.emit, session, schema)
+    try:
+        session.connect({'host': '127.0.0.1', 'port': device.port, 'username': 'test', 'password': 'test'})
+        manager = session.require_connected()
+        assert device.requests == []
+        schema.compile([ModuleSpec('test-rpc'), ModuleSpec('test-system')], YangRepository('rpc-test', device.port, tmp_path), session)
+        before = list(device.requests)
+        ping = intent(schema, name='ping')
+        for _ in range(3):
+            assert '<ping' in backend.dispatch('yangRpc.preview', ping)['xml']
+        assert device.requests == before
+        result = backend.dispatch('yangRpc.execute', ping)
+        assert result['rpcOutput'] == [] and not result['errors']
+        complex_intent = intent(schema, {'required': 'x'})
+        preview = backend.dispatch('yangRpc.preview', complex_intent)['xml']
+        result = backend.dispatch('yangRpc.execute', complex_intent)
+        assert result['rpcOutput'][0]['children'][0]['value'] == '0'
+        assert etree.tostring(etree.fromstring(device.payloads[-1])[0], method='c14n', exclusive=True) == etree.tostring(etree.fromstring(preview.encode(), etree.XMLParser(remove_blank_text=True)), method='c14n', exclusive=True)
+        device.rpc_unexpected = True
+        result = backend.dispatch('yangRpc.execute', complex_intent)
+        assert 'parseWarning' in result and 'unexpected' in result['rawXml'] and not result['errors']
+        device.rpc_unexpected = False; device.rpc_errors = True
+        result = backend.dispatch('yangRpc.execute', ping)
+        assert len(result['errors']) == 2 and result['rawXml'].count('<rpc-error>') == 2
+        device.rpc_errors = False
+        op = next(o for o in schema.tree['operations'] if o['module'] == 'test-system' and o['name'] == 'clear-lldp-counters')
+        from test_yang_rpc import instance
+        params = {'operation': op['id'], 'nodes': [instance(n, 'false' if n['type'] == 'boolean' else 'ETH1/1') for n in op['input']]}
+        preview = backend.dispatch('yangRpc.preview', params)['xml']
+        assert '<input' not in preview and 'ETH1/1' in preview
+        assert backend.dispatch('yangRpc.execute', params)['rpcOutput'][0]['value'] == '2'
+        assert session.require_connected() is manager
+        assert device.requests[len(before):] == ['ping', 'complex', 'complex', 'ping', 'clear-lldp-counters']
+        session.disconnect()
+        assert device.requests[-1] == 'close-session'
+    finally:
+        session.disconnect(); schema.clear(); device.close()
+    assert not device.errors

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, unwrap } from './api/netconf-api';
-import type { DataNode, RetrievalProvenance, BackendStatus, ConnectionInfo, ConnectionParams, LogEntry, SchemaNode, SchemaProgress, YangModuleInfo } from '../../shared/types';
+import type { DataNode, YangRpc, RetrievalProvenance, BackendStatus, ConnectionInfo, ConnectionParams, LogEntry, SchemaNode, SchemaProgress, YangModuleInfo } from '../../shared/types';
 import { ConnectionForm } from './features/connection/ConnectionForm';
+import { afterRpc } from './features/rpcs/state';
+import { RpcWorkbench, useRpcState } from './features/rpcs/RpcWorkbench';
 import { SchemaView } from './features/schema/SchemaView';
 import { RequestBuilder } from './features/requests/RequestBuilder';
 import { toChanges, type DraftNode } from './features/edits/tree';
@@ -12,6 +14,10 @@ import { readPreference, usePreference, writePreference } from './features/workb
 import { LogView } from './features/logs/LogView';
 
 export default function App() {
+  const rpcState = useRpcState();
+  const [responseOwner, setResponseOwner] = useState<'request' | 'rpc'>('request');
+  const [operations, setOperations] = useState<YangRpc[]>([]);
+  const [rpcActive, setRpcActive] = useState(false);
   const [editOptions, setEditOptions] = useState(emptyEdit);
   const [draftTree, setDraftTree] = useState<DraftNode[]>([]);
   const draft = useMemo(() => ({ ...editOptions, changes: toChanges(draftTree) }), [editOptions, draftTree]);
@@ -77,7 +83,7 @@ export default function App() {
     // Read the existing snapshot on renderer reload; these getters never fetch.
     void Promise.all([api.getModules(), api.getSchemaTree()]).then(([mods, tree]) => {
       if (alive && !inFlight.current && !mods.error && !tree.error) {
-        setModules(mods.result); setRoots(tree.result.roots);
+        setModules(mods.result); setRoots(tree.result.roots); setOperations(tree.result.operations || []);
       }
     });
     return () => { alive = false; };
@@ -90,7 +96,7 @@ export default function App() {
     finally { inFlight.current = false; setBusy(false); }
   }
   const connect = async (params: ConnectionParams) => operation(async () => {
-    setCandidateModified(false);
+    setCandidateModified(false); setOperations([]); setRpcActive(false); rpcState.reset(); setResponseOwner('request');
     setDataNodes(null); setProvenance(null); setRetrievalXml(''); setDraft({ ...emptyEdit(), target: editCapabilities(info.capabilities).editableTargets[0] || 'candidate' }); setEditMode(false); setIntent(emptyRequest()); setModules([]); setRoots([]); setGeneration(g => g + 1); setProgress(null);
     unwrap(await api.connect(params));
     // Events own the state; a late response must not overwrite transport loss.
@@ -101,7 +107,7 @@ export default function App() {
       unwrap(await api.fetchSchemas());
       const loadedModules = unwrap(await api.getModules());
       const tree = unwrap(await api.getSchemaTree());
-      setDataNodes(null); setProvenance(null); setRetrievalXml(''); setDraft({ ...emptyEdit(), target: editCapabilities(info.capabilities).editableTargets[0] || 'candidate' }); setEditMode(false); setIntent(emptyRequest()); setModules(loadedModules); setRoots(tree.roots); setGeneration(g => g + 1);
+      setDataNodes(null); setProvenance(null); setRetrievalXml(''); setDraft({ ...emptyEdit(), target: editCapabilities(info.capabilities).editableTargets[0] || 'candidate' }); setEditMode(false); setIntent(emptyRequest()); setModules(loadedModules); setRoots(tree.roots); setOperations(tree.operations || []); setRpcActive(false); rpcState.reset(); setResponseOwner('request'); setGeneration(g => g + 1);
     } finally { setLoading(false); }
   });
   return <main>
@@ -117,10 +123,10 @@ export default function App() {
       {loading && <span>Disconnect available after loading finishes.</span>}
     </div>
     {error && <div className="error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
-    <RequestBuilder editToolbarTarget={editToolbarTarget} editMode={editMode} setEditMode={setEditMode} draft={draft} setDraft={setEditOptions} clearDraft={() => setDraftTree([])} hasDraft={draftTree.length > 0} candidateModified={candidateModified} onCandidateAttempt={(action, success) => { setProvenance(old => afterCandidate(old, action)); if (success) setCandidateModified(false); }} onEditAttempt={(edit, success) => { setProvenance(old => afterEdit(old, edit)); if (success && edit.target === 'candidate' && edit.testOption !== 'test-only') setCandidateModified(true); }} key={`request-${generation}`} intent={intent} setIntent={setIntent} roots={roots} info={info} busy={busy} run={operation} previewTarget={previewTarget} responseTarget={responseTarget} onExecute={() => { setOutputTab('response'); setDockOpen(true); }} onResponse={response => { if (response.dataNodes !== undefined) { setDataNodes(response.dataNodes); setRetrievalXml(response.rawXml); setProvenance({ operation: intent.operation, datastore: intent.datastore, stale: false }); } }} />
+    <RequestBuilder inactive={rpcActive} editToolbarTarget={editToolbarTarget} editMode={editMode} setEditMode={setEditMode} draft={draft} setDraft={setEditOptions} clearDraft={() => setDraftTree([])} hasDraft={draftTree.length > 0} candidateModified={candidateModified} onCandidateAttempt={(action, success) => { setProvenance(old => afterCandidate(old, action)); if (success) setCandidateModified(false); }} onEditAttempt={(edit, success) => { setProvenance(old => afterEdit(old, edit)); if (success && edit.target === 'candidate' && edit.testOption !== 'test-only') setCandidateModified(true); }} key={`request-${generation}`} intent={intent} setIntent={setIntent} roots={roots} info={info} busy={busy} run={operation} previewTarget={rpcActive ? null : previewTarget} responseTarget={responseOwner === 'request' ? responseTarget : null} onExecute={() => { setResponseOwner('request'); setOutputTab('response'); setDockOpen(true); }} onResponse={response => { if (response.dataNodes !== undefined) { setDataNodes(response.dataNodes); setRetrievalXml(response.rawXml); setProvenance({ operation: intent.operation, datastore: intent.datastore, stale: false }); } }} />
     <Group className="workbench" orientation="vertical" defaultLayout={readPreference<Layout | undefined>('vertical', undefined)} onLayoutChanged={layout => { if (dockOpen && layout.output > 10) writePreference('vertical', layout); }}>
       <Panel id="workspace" minSize="12%">
-    <SchemaView setEditToolbarTarget={setEditToolbarTarget} draftTree={draftTree} setDraftTree={setDraftTree} activateEdit={() => setEditMode(true)} retrievalXml={retrievalXml} draft={draft} editMode={editMode} provenance={provenance} key={`schema-${generation}`} dataNodes={dataNodes} modules={modules} roots={roots} paths={intent.selectedPaths} disabled={busy} toggle={node => {
+    <SchemaView rpcActive={rpcActive} setRpcActive={setRpcActive} rpcWorkspace={inspect => <RpcWorkbench state={rpcState} operations={operations} busy={busy} connected={info.state === 'connected'} run={operation} onPreview={() => { setOutputTab('preview'); setDockOpen(true); }} inspect={inspect} onAttempt={() => setProvenance(afterRpc)} onExecute={() => { setResponseOwner('rpc'); setOutputTab('response'); setDockOpen(true); }} previewTarget={rpcActive ? previewTarget : null} responseTarget={responseOwner === 'rpc' ? responseTarget : null} />} setEditToolbarTarget={setEditToolbarTarget} draftTree={draftTree} setDraftTree={setDraftTree} activateEdit={() => setEditMode(true)} retrievalXml={retrievalXml} draft={draft} editMode={editMode} provenance={provenance} key={`schema-${generation}`} dataNodes={dataNodes} modules={modules} roots={roots} paths={intent.selectedPaths} disabled={busy} toggle={node => {
       const descendants = new Set<string>();
       const collect = (n: SchemaNode) => { descendants.add(n.path); n.children.forEach(collect); }; collect(node);
       const selectedPaths = intent.selectedPaths.filter(p => !descendants.has(p));

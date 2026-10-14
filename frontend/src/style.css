@@ -222,3 +222,12 @@ footer { padding: 5px 16px; font-size: 10px; border-top: 1px solid var(--border)
 @media (prefers-reduced-motion: reduce) {
   button, .splitter { transition: none; }
 }
+
+.rpc-workbench { padding: 12px; }
+.rpc-workbench > label { display: inline-flex; gap: 8px; margin-right: 12px; }
+.rpc-workbench > select { min-width: 280px; max-width: 100%; }
+.rpc-input-node { border-left: 1px solid var(--border, #344254); padding-left: 12px; margin-top: 5px; }
+.rpc-input-row, .rpc-add { display: flex; align-items: center; gap: 8px; padding: 3px 0; flex-wrap: wrap; }
+.rpc-input-row > input { flex: 1; min-width: 180px; max-width: 500px; }
+.rpc-input-tree { padding: 3px 0 4px 8px; }
+.rpc-validation { opacity: .8; }

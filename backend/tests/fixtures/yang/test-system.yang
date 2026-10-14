@@ -4,6 +4,7 @@ module test-system {
   prefix ts;
   revision 2026-09-14;
   feature advanced;
+  typedef rpc-count { type uint16; }
   grouping common-settings {
     leaf enabled { type boolean; default true; }
   }
@@ -19,5 +20,13 @@ module test-system {
       leaf mtu { type uint16; }
       leaf statistics { config false; type uint64; }
     }
+  }
+  rpc clear-lldp-counters {
+    description "Clear LLDP counters on the chosen interface.";
+    input {
+      leaf total-neighbors-stat { type boolean; }
+      leaf interface { type leafref { path "/system/interface/name"; } }
+    }
+    output { leaf cleared { type uint32; } }
   }
 }

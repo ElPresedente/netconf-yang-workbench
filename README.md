@@ -14,7 +14,7 @@ A local Electron/React desktop NETCONF and YANG inspection tool. Electron owns a
 
 The desktop uses a workbench layout: compact connection and request toolbars, a dominant central tree, collapsible schema sidebar and inspector, and one full-width output dock. Drag the splitters to resize side panes and output height. **Preview**, **Response**, and **Session log** tabs share the dock; Execute activates Response. Collapse the dock for tree space, or use **Maximize / Restore** (also double-click the dock header) for large replies. Server capabilities remain available but are collapsed by default. The sidebar includes module revisions and a simple schema name/module filter.
 
-Sidebar/inspector visibility, splitter sizes, output collapse state and last output tab persist in renderer localStorage. No credentials or device data are saved there. Raw RPC execution, notifications, multiple simultaneous devices, cache-only loading and distributable packaging remain future work.
+Sidebar/inspector visibility, splitter sizes, output collapse state and last output tab persist in renderer localStorage. No credentials or device data are saved there. Raw XML authoring, notifications, multiple simultaneous devices, cache-only loading and distributable packaging remain future work.
 
 ## Prerequisites
 
@@ -133,7 +133,7 @@ The renderer receives a saved-credential indicator, never the decrypted saved pa
 
 ## Last response data tree
 
-The central **Schema / Last response / Edit draft** tabs separate schema selection, runtime inspection, and configuration authoring. A successful GET or GET-CONFIG is parsed through the same active libyang context used by the request builder. **Last response** shows returned containers, keyed list instances, leaf-lists and canonical scalar values, with schema type and state hints. Clicking data nodes inspects them without changing request selection. Configurable nodes also offer explicit edit staging.
+The central **Schema / Last response / Edit draft / RPC** tabs separate schema selection, runtime inspection, and configuration authoring. A successful GET or GET-CONFIG is parsed through the same active libyang context used by the request builder. **Last response** shows returned containers, keyed list instances, leaf-lists and canonical scalar values, with schema type and state hints. Clicking data nodes inspects them without changing request selection. Configurable nodes also offer explicit edit staging.
 
 The shared inspector shows runtime value, module/namespace, list keys, schema path and instance path alongside linked schema metadata. `schemaPath` identifies the effective schema node; `instancePath` identifies the particular list/leaf-list instance using libyang's paths. Multi-key labels use YANG key order. Scalar values are canonical strings so uint64/decimal64 precision survives JSON. Partial responses contain only returned nodes; absent/default nodes are not synthesized.
 
@@ -179,3 +179,16 @@ A successful non-test-only candidate edit shows **This session modified candidat
 Both actions open Response, preserving the raw rpc-reply and all rpc-errors. They retain the Edit draft after success or failure. Commit marks generic GET, running and candidate snapshots stale; Discard marks candidate snapshots stale and preserves running/generic GET freshness. Failed or uncertain attempts use the same conservative stale rules; neither action makes an existing snapshot fresh. Refresh only happens on a subsequent explicit GET/GET-CONFIG.
 
 There is no automatic commit after edit-config, no discard on Disconnect, and no automatic retrieval, retry, reconnect or schema reload. Both use the same active session. Confirmed-commit and standalone validate remain out of scope.
+
+
+## YANG-defined RPCs
+
+After explicit Connect and Load YANG models, open **RPC**. Search by module/name and select an operation from the module-grouped list. Only top-level RPCs from implemented device modules are offered, using the compiled effective model and enabled features. Selection sends nothing.
+
+Required input fields appear in the central tree. Use **Add field / entry** to include optional fields, containers, presence containers, list entries and leaf-list values. Remove excludes an occurrence; choice selectors replace the selected case. Values remain textual, preserving numeric precision. Boolean false, numeric zero, empty string and YANG empty are distinct from absence. No defaults or optional values are invented. Click input/output names for schema metadata and descriptions in the inspector.
+
+**Preview RPC** validates locally and shows only the qualified operation payload in the Preview dock. **Execute RPC** requires a preview of the current arguments and dispatches through the existing connection. ncclient supplies the NETCONF envelope and framing. Parameterless RPCs have no fabricated input. Arguments are memory-only and reset on new connection attempts and successful schema replacement; they are never saved to profiles or localStorage. Operation summaries do not log outbound arguments. Raw device replies remain subject to the existing bounded response logging.
+
+The Response dock preserves complete rpc-reply XML and every rpc-error. The RPC workspace displays schema-aware structured output when libyang can parse it, including repeated values and lists. An ok reply is valid. A local output parsing warning never changes remote success into failure. All custom RPC attempts that may have reached the server conservatively mark retained runtime snapshots potentially stale, including operations named get-*. No snapshot is cleared or automatically refreshed.
+
+Local checks enforce references, structure, mandatory fields, choices, list keys/cardinality and scalar parsing using libyang's operation parser. Datastore-dependent leafrefs and must/when constraints require server validation; conditional mandatory fields are deferred rather than guessed without datastore context. Opaque anydata/anyxml inputs are currently unsupported. YANG 1.1 actions and notifications remain future work: actions need concrete datastore-instance context and list keys, unlike these top-level RPCs.

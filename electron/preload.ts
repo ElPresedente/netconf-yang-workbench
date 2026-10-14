@@ -7,6 +7,8 @@ function subscribe<T>(name: string, callback: (value: T) => void): () => void {
   return () => ipcRenderer.removeListener(`netconf:${name}`, listener);
 }
 const api: NetconfAPI = {
+  previewYangRpc: params => ipcRenderer.invoke('netconf:previewYangRpc', params),
+  executeYangRpc: params => ipcRenderer.invoke('netconf:executeYangRpc', params),
   commitCandidate: () => ipcRenderer.invoke('netconf:commitCandidate'),
   discardCandidate: () => ipcRenderer.invoke('netconf:discardCandidate'),
   previewEdit: params => ipcRenderer.invoke('netconf:previewEdit', params),

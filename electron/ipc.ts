@@ -8,7 +8,7 @@ export function registerIPC(window: BrowserWindow, backend: BackendProcess) {
   const store = () => profiles ||= new ProfileStore(app.getPath('userData'), safeStorage);
   let connectionState = 'disconnected';
   const commands: Record<string, string> = {
-    commitCandidate: 'candidate.commit', discardCandidate: 'candidate.discard',
+    previewYangRpc: 'yangRpc.preview', executeYangRpc: 'yangRpc.execute', commitCandidate: 'candidate.commit', discardCandidate: 'candidate.discard',
     previewEdit: 'edit.preview', executeEdit: 'edit.execute', previewRequest: 'request.preview', executeRequest: 'request.execute', connect: 'connect', disconnect: 'disconnect', getConnectionState: 'connection.getState',
     fetchSchemas: 'schema.fetch', getModules: 'schema.getModules', getSchemaTree: 'schema.getTree',
   };
@@ -30,7 +30,7 @@ export function registerIPC(window: BrowserWindow, backend: BackendProcess) {
       } catch {
         return { error: { code: 'profile_error', message: 'Profile operation failed. Check profile fields and secure storage availability; enter a transient password if needed.' } };
       }
-      return backend.request(commands[method], ['connect', 'previewRequest', 'executeRequest', 'previewEdit', 'executeEdit'].includes(method) ? params : {});
+      return backend.request(commands[method], ['previewYangRpc', 'executeYangRpc', 'connect', 'previewRequest', 'executeRequest', 'previewEdit', 'executeEdit'].includes(method) ? params : {});
     });
   }
   const events = ['connection.stateChanged', 'schema.progress', 'log.entry', 'backend.status'];

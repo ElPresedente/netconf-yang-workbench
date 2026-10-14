@@ -5,6 +5,7 @@ import { api, unwrap } from '../../api/netconf-api';
 import { editCapabilities } from '../edits/state';
 import { relevantLists, supportedDatastores, supportedWithDefaults } from './state';
 interface Props {
+  inactive?: boolean;
   candidateModified?: boolean;
   onCandidateAttempt: (action: CandidateAction, success: boolean) => void;
   editToolbarTarget?: HTMLElement | null;
@@ -15,7 +16,7 @@ interface Props {
   onExecute?: () => void; onResponse?: (response: RequestResponse) => void;
   info: ConnectionInfo; busy: boolean; run: (action: () => Promise<void>) => Promise<void>;
 }
-export function RequestBuilder({ candidateModified, onCandidateAttempt, editToolbarTarget, clearDraft, hasDraft, intent, setIntent, roots, info, busy, run, previewTarget, responseTarget, onExecute, onResponse, editMode, setEditMode, draft, setDraft, onEditAttempt }: Props) {
+export function RequestBuilder({ inactive, candidateModified, onCandidateAttempt, editToolbarTarget, clearDraft, hasDraft, intent, setIntent, roots, info, busy, run, previewTarget, responseTarget, onExecute, onResponse, editMode, setEditMode, draft, setDraft, onEditAttempt }: Props) {
   const activeIntent = editMode ? draft : intent;
   const count = editMode ? draft.changes.length : intent.selectedPaths.length;
   const editCaps = editCapabilities(info.capabilities);
@@ -88,8 +89,8 @@ export function RequestBuilder({ candidateModified, onCandidateAttempt, editTool
       {editMode && <span>{draft.changes.length} staged changes · no automatic commit or refresh</span>}
     </section>;
   return <>
-    {editMode && editToolbarTarget ? createPortal(controls, editToolbarTarget) : controls}
-    {!editMode && <div className="key-fields">{relevantLists(roots, intent.selectedPaths).map(list => <fieldset key={list.path} disabled={busy}><legend title={list.path}>{list.name} keys <code>{list.path}</code></legend>{list.keys.map(key => <label key={key}>{key}<input aria-label={`${list.path} key ${key}`} value={intent.listKeyValues[list.path]?.[key] || ''} onChange={e => setIntent({ ...intent, listKeyValues: { ...intent.listKeyValues, [list.path]: { ...intent.listKeyValues[list.path], [key]: e.target.value } } })} /></label>)}</fieldset>)}</div>}
+    {!inactive && (editMode && editToolbarTarget ? createPortal(controls, editToolbarTarget) : controls)}
+    {!inactive && !editMode && <div className="key-fields">{relevantLists(roots, intent.selectedPaths).map(list => <fieldset key={list.path} disabled={busy}><legend title={list.path}>{list.name} keys <code>{list.path}</code></legend>{list.keys.map(key => <label key={key}>{key}<input aria-label={`${list.path} key ${key}`} value={intent.listKeyValues[list.path]?.[key] || ''} onChange={e => setIntent({ ...intent, listKeyValues: { ...intent.listKeyValues, [list.path]: { ...intent.listKeyValues[list.path], [key]: e.target.value } } })} /></label>)}</fieldset>)}</div>}
     {output(<section className="pane preview"><h2>Request preview</h2><div className="scroll">{error ? <p role="alert" className="error">{error}</p> : <pre>{preview?.intent === activeIntent ? preview.xml : count ? 'Preparing preview…' : editMode ? hasDraft ? 'Edit a value or choose a node operation to include it in the payload.' : 'Add configuration to the Edit draft tree to preview edit-config.' : 'Check schema nodes to build a subtree filter.'}</pre>}</div></section>, previewTarget)}
     {output(<section className="pane response"><h2>Response</h2><div className="scroll">{notice && <p role="status">{notice}</p>}{executionError && <p className="error" role="alert">{executionError}</p>}{response?.parseWarning && <p className="error" role="alert">{response.parseWarning}</p>}{response?.errors.map((error, i) => <div role="alert" className="error" key={i}>{Object.entries(error).map(([key, value]) => <div key={key}><b>{key}</b>: {value}</div>)}</div>)}<pre>{response?.rawXml || 'No request executed.'}</pre></div></section>, responseTarget)}
   </>;

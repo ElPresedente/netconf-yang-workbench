@@ -1,0 +1,6 @@
+module test-rpc-augment {
+ yang-version 1.1; namespace "urn:test:rpc:augment"; prefix a;
+ import test-rpc { prefix r; }
+ augment "/r:complex/r:input" { leaf extra { type string; } }
+ augment "/r:complex/r:output/r:result" { leaf extra-result { type string; } }
+}

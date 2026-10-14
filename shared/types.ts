@@ -17,7 +17,14 @@ export interface SchemaNode {
   children: SchemaNode[];
 }
 export interface YangModuleInfo { name: string; revision: string | null; namespace: string }
-export interface SchemaTree { roots: SchemaNode[] }
+export interface RpcSchemaNode extends Omit<SchemaNode, 'kind' | 'children'> {
+  kind: SchemaNode['kind'] | 'choice' | 'case'; children: RpcSchemaNode[];
+  conditional?: boolean; minElements?: number; maxElements?: number | null; enums?: string[]; status?: string;
+}
+export interface YangRpc { id: string; path: string; name: string; module: string; namespace: string; description: string | null; status: string; input: RpcSchemaNode[]; output: RpcSchemaNode[] }
+export interface RpcInputNode { id: string; schemaPath: string; value?: string | null; children: RpcInputNode[] }
+export interface YangRpcIntent { operation: string; nodes: RpcInputNode[] }
+export interface SchemaTree { roots: SchemaNode[]; operations?: YangRpc[] }
 export interface SchemaSummary { modulesDownloaded: number; modulesLoaded: number }
 export interface LogEntry {
   timestamp: string; level: 'info' | 'warning' | 'error'; message: string;
@@ -27,6 +34,8 @@ export interface SchemaProgress { current: number; total: number; module: string
 export interface BackendStatus { ready: boolean; error?: string }
 export type CandidateAction = 'commit' | 'discard';
 export interface NetconfAPI {
+  previewYangRpc(params: YangRpcIntent): Promise<Result<{ xml: string; validationNotice: string }>>;
+  executeYangRpc(params: YangRpcIntent): Promise<Result<RequestResponse>>;
   commitCandidate(): Promise<Result<RequestResponse>>;
   discardCandidate(): Promise<Result<RequestResponse>>;
   previewEdit(params: EditIntent): Promise<Result<{ xml: string }>>;
@@ -57,7 +66,7 @@ export interface RequestIntent {
   operation: 'get' | 'get-config'; datastore: Datastore | null;
   selectedPaths: string[]; listKeyValues: Record<string, Record<string, string>>;
 }
-export interface RequestResponse { dataNodes?: DataNode[]; parseWarning?: string; xml: string; rawXml: string; errors: Record<string, string>[] }
+export interface RequestResponse { rpcOutput?: DataNode[]; validationNotice?: string; dataNodes?: DataNode[]; parseWarning?: string; xml: string; rawXml: string; errors: Record<string, string>[] }
 
 export interface DataNode {
   id: string; name: string; module: string; namespace: string;

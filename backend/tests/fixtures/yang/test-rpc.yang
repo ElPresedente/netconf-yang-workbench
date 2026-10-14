@@ -1,0 +1,33 @@
+module test-rpc {
+ yang-version 1.1; namespace "urn:test:rpc"; prefix r;
+ import test-system { prefix sys; }
+ feature advanced;
+ rpc ping { description "An operation without parameters."; }
+ rpc featured { if-feature advanced; }
+ rpc clear-lldp-counters {
+  description "Clear LLDP counters for an optional interface.";
+  input {
+   leaf total-neighbors-stat { type boolean; }
+   leaf interface { type leafref { path "/sys:system/sys:interface/sys:name"; } }
+  }
+ }
+ rpc complex {
+  input {
+   leaf required { type string; mandatory true; }
+   leaf enabled { type boolean; }
+   leaf count { type uint64; }
+   leaf imported-count { type sys:rpc-count; }
+   leaf conditional { when "../enabled = 'true'"; type string; mandatory true; }
+   leaf flag { type empty; }
+   leaf mode { type enumeration { enum fast; enum slow; } }
+   container nested { leaf text { type string; } }
+   container present { presence "Include"; leaf needed { type string; mandatory true; } }
+   container bounded { presence "Check cardinality"; leaf-list values { type string; min-elements 2; max-elements 3; } }
+   leaf-list tags { type string; max-elements 3; }
+   list entries { key "name"; leaf name { type string; } leaf value { type int32; } }
+   list keyless { leaf text { type string; } }
+   choice method { case one { leaf first { type string; } } case two { leaf second { type string; } } }
+  }
+  output { container result { leaf count { type uint64; } list rows { key "name"; leaf name { type string; } leaf-list values { type string; } } } }
+ }
+}

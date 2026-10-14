@@ -215,3 +215,14 @@ class NetconfSession:
             return self._reply_result(self._rpc(method))
         finally:
             manager.raise_mode = previous
+
+    def execute_yang_rpc(self, payload):
+        manager = self.require_connected()
+        # Arguments may contain secrets: log the operation name only.
+        self.log('YANG RPC: ' + etree.QName(payload).localname, direction='tx')
+        previous = manager.raise_mode
+        try:
+            manager.raise_mode = RaiseMode.NONE
+            return self._reply_result(self._rpc('dispatch', rpc_command=payload))
+        finally:
+            manager.raise_mode = previous

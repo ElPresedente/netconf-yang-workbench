@@ -36,7 +36,7 @@ def serialize_node(node):
 
 
 def serialize_context(context, *, implemented_names=None, loaded_names=None):
-    modules, roots = [], []
+    modules, roots, operations = [], [], []
     for module in context:
         # libyang loads internal implemented modules even when the server does
         # not advertise them. They must not become device data-tree roots.
@@ -47,4 +47,40 @@ def serialize_context(context, *, implemented_names=None, loaded_names=None):
             modules.append({"name": module.name(), "revision": c2str(module.cdata.revision), "namespace": namespace(module)})
         if module.implemented() and (implemented_names is None or module.name() in implemented_names):
             roots.extend(serialize_node(node) for node in module.children(types=DATA_TYPES))
-    return sorted(modules, key=lambda m: m["name"]), {"roots": roots}
+            operations.extend(serialize_rpc(node) for node in module.children(types=(libyang.SNode.RPC,)))
+    return sorted(modules, key=lambda m: m["name"]), {"roots": roots, "operations": operations}
+
+
+def operation_children(node):
+    if node is None:
+        return []
+    if isinstance(node, libyang.SChoice):
+        children = node.children(with_case=True)
+    else:
+        children = node.children(with_choice=True)
+    return [serialize_operation_node(child) for child in children]
+
+
+def serialize_operation_node(node):
+    result = serialize_node(node)
+    if isinstance(node, libyang.SChoice):
+        result['kind'] = 'choice'
+    elif isinstance(node, libyang.SCase):
+        result['kind'] = 'case'
+    result['children'] = operation_children(node) if hasattr(node, 'children') else []
+    result['conditional'] = bool(list(node.when_conditions()))
+    result['status'] = 'obsolete' if node.obsolete() else 'deprecated' if node.deprecated() else 'current'
+    if isinstance(node, (libyang.SList, libyang.SLeafList)):
+        result.update(minElements=node.min_elements(), maxElements=node.max_elements())
+    if isinstance(node, (libyang.SLeaf, libyang.SLeafList)):
+        result['enums'] = [e.name() for e in node.type().enums()]
+    return result
+
+
+def serialize_rpc(node):
+    module = node.module()
+    return {'id': node.schema_path(), 'path': node.schema_path(), 'name': node.name(),
+            'module': module.name(), 'namespace': namespace(module),
+            'description': node.description(),
+            'status': 'obsolete' if node.obsolete() else 'deprecated' if node.deprecated() else 'current',
+            'input': operation_children(node.input()), 'output': operation_children(node.output())}
