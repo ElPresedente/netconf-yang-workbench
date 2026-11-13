@@ -34,7 +34,8 @@ class SSHServer(paramiko.ServerInterface):
 
 
 class Device:
-    def __init__(self, version='1.1', with_defaults=False, edit=False):
+    def __init__(self, version='1.1', with_defaults=False, edit=False, rsa_sha2_only=False):
+        self.rsa_sha2_only = rsa_sha2_only
         self.candidate_errors = False
         self.edit = edit
         self.with_defaults = with_defaults
@@ -56,6 +57,8 @@ class Device:
         try:
             connection, _ = self.listener.accept()
             self.transport = paramiko.Transport(connection)
+            if self.rsa_sha2_only:
+                self.transport.get_security_options().key_types = ('rsa-sha2-512', 'rsa-sha2-256')
             self.transport.add_server_key(self.key)
             self.transport.start_server(server=SSHServer())
             channel = self.transport.accept(10)
@@ -144,6 +147,9 @@ class Device:
                     for name, value in [('error-type', 'application'), ('error-tag', 'operation-failed'), ('error-severity', 'error'), ('error-app-tag', 'fixture'), ('error-path', '/system'), ('error-message', 'Fixture denied read'), ('error-info', 'details')]:
                         etree.SubElement(error, f'{{{BASE}}}{name}').text = value
                 elif operation == 'get-schema':
+                    # Strict servers reject ncclient's unqualified format
+                    # identityref. Omit it to use the model's YANG default.
+                    assert rpc[0].find(f'{{{MON}}}format') is None
                     name = rpc[0].findtext(f'{{{MON}}}identifier')
                     etree.SubElement(reply, f'{{{MON}}}data').text = (FIXTURES / f'{name}.yang').read_text()
                 elif operation in ('ping', 'clear-lldp-counters', 'complex'):
@@ -179,6 +185,45 @@ class Device:
             self.transport.close()
         self.listener.close()
         self.thread.join(3)
+
+
+@pytest.mark.parametrize('trust', ['trusted', 'changed', 'unknown'])
+def test_known_rsa_key_with_sha2_only_server(tmp_path, trust):
+    from netconf_backend.netconf.ssh import SSHSession as CompatibleSSHSession
+    from netconf_backend.protocol.rpc import BackendError
+
+    device = Device(rsa_sha2_only=True)
+    known_hosts = tmp_path / 'known_hosts'
+    keys = paramiko.HostKeys()
+    if trust != 'unknown':
+        key = device.key if trust == 'trusted' else paramiko.RSAKey.generate(2048)
+        # Exercise hashed nonstandard-port entries, as written by OpenSSH.
+        hostname = paramiko.HostKeys.hash_host(f'[127.0.0.1]:{device.port}')
+        keys.add(hostname, 'ssh-rsa', key)
+    keys.save(str(known_hosts))
+    original_contents = known_hosts.read_bytes()
+
+    class TestTransport(CompatibleSSHSession):
+        def load_known_hosts(self, filename=None):
+            return super().load_known_hosts(str(known_hosts))
+
+    session = NetconfSession(lambda *args: None, transport_factory=TestTransport)
+    try:
+        params = {'host': '127.0.0.1', 'port': device.port,
+                  'username': 'test', 'password': 'test-password'}
+        if trust == 'trusted':
+            assert session.connect(params)['state'] == 'connected'
+            assert device.transport.host_key_type == 'rsa-sha2-512'
+            session.disconnect()
+            assert not device.errors
+        else:
+            with pytest.raises(BackendError, match='SSH host key is unknown or changed'):
+                session.connect(params)
+            assert session.info()['state'] == 'disconnected'
+        assert known_hosts.read_bytes() == original_contents
+    finally:
+        session.disconnect()
+        device.close()
 
 
 @pytest.mark.parametrize('with_defaults', [False, True])

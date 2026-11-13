@@ -5,6 +5,7 @@ from ..protocol.rpc import BackendError
 from .repository import filename
 from .serializer import serialize_context
 from .runtime import create_context
+from .api import namespace, revision
 
 
 class SchemaContext:
@@ -54,8 +55,18 @@ class SchemaContext:
 
             ctx.external_module_loader.set_module_data_clb(module_loader)
             try:
+                # libyang owns its built-in annotation module and cannot replace
+                # it with the revision advertised by an older libyang server.
+                builtin_yang = next((m for m in ctx if m.name() == "yang"
+                                     and namespace(m) == "urn:ietf:params:xml:ns:yang:1"
+                                     and m.implemented()), None)
                 for spec in inventory:
                     if spec.implemented and not spec.submodule:
+                        if spec.name == "yang" and builtin_yang is not None:
+                            if spec.revision and spec.revision != revision(builtin_yang):
+                                session.log(f"Using libyang's built-in yang@{revision(builtin_yang)} "
+                                            f"annotations; device advertises yang@{spec.revision}", level="warning")
+                            continue
                         ctx.load_module(spec.name, spec.revision, enabled_features=spec.features)
                 ctx.compile_schema()
                 session.require_connected()

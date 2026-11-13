@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 import pytest
-from ncclient.transport.errors import AuthenticationError
+from ncclient.transport.errors import AuthenticationError, SSHError
 from netconf_backend.netconf.session import NetconfSession, DefaultDeviceHandler, BASE_11
 from netconf_backend.protocol.rpc import BackendError
 
@@ -54,6 +54,26 @@ def test_failure_never_reconnects():
         session.connect(PARAMS)
     assert exc.value.code == "authentication_failed"
     assert states(events) == ["connecting", "disconnected"]
+    factory.assert_called_once()
+
+
+@pytest.mark.parametrize('reason, expected', [
+    ('Could not open socket to device:830', 'Cannot reach SSH server'),
+    ('Negotiation failed: never-log-this', 'SSH negotiation failed'),
+    ('Could not open connection, possibly due to unacceptable SSH subsystem name.',
+     'SSH server rejected the NETCONF subsystem'),
+    ('unexpected never-log-this', 'Connection failed (SSHError)'),
+])
+def test_ssh_failure_diagnostics_do_not_expose_exception(reason, expected):
+    session, transport, _, factory, events = setup_session()
+    transport.connect.side_effect = SSHError(reason)
+    with pytest.raises(BackendError) as exc:
+        session.connect(PARAMS)
+    assert expected in exc.value.message
+    assert PARAMS['password'] not in str(exc.value.dto())
+    assert PARAMS['password'] not in str(events)
+    assert states(events) == ['connecting', 'disconnected']
+    transport.transport.close.assert_called_once()
     factory.assert_called_once()
 
 

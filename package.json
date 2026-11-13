@@ -5,6 +5,8 @@
   "description": "Local desktop NETCONF/YANG client",
   "main": "dist/electron/main.js",
   "scripts": {
+    "pack:appimage": "node scripts/appimage.mjs",
+    "test:appimage": "node scripts/appimage-smoke.mjs",
     "build": "tsc --noEmit -p tsconfig.json && tsc -p electron/tsconfig.json && vite build",
     "dev": "node scripts/dev.mjs",
     "start": "electron .",
@@ -24,6 +26,7 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",
     "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.55.0",
     "typescript": "^5.8.0",
     "vite": "^6.3.0"

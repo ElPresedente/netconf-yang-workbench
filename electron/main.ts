@@ -21,7 +21,7 @@ app.whenReady().then(async () => {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   registerIPC(window, backend);
-  backend.start(app.getAppPath());
+  backend.start(app.getAppPath(), app.isPackaged ? process.resourcesPath : undefined);
   const rendererPath = path.join(__dirname, '../frontend/index.html');
   const loadRenderer = async () => {
     try {

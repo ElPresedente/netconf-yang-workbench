@@ -10,6 +10,7 @@ dependencies = ["ncclient==0.7.1", "paramiko>=3.2,<5", "libyang==5.0.0", "platfo
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+build = ["pyinstaller==6.22.3"]
 
 [project.scripts]
 netconf-backend = "netconf_backend.main:main"

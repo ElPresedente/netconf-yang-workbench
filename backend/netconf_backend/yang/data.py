@@ -1,9 +1,7 @@
 """Runtime DTOs from the active libyang context; XML handling only unwraps NETCONF."""
 import libyang
-from _libyang import lib
-from libyang.util import c2str
 from lxml import etree
-from .serializer import namespace
+from .api import namespace, canonical_value, any_value, require_context
 
 NC = 'urn:ietf:params:xml:ns:netconf:base:1.0'
 
@@ -14,15 +12,15 @@ def serialize_data(node):
     value = None
     if isinstance(node, (libyang.DLeaf, libyang.DLeafList)):
         # libyang canonical text preserves uint64/decimal64 precision in JSON.
-        value = c2str(lib.lyd_get_value(node.cdata))
+        value = canonical_value(node)
     elif isinstance(node, (libyang.DAnydata, libyang.DAnyxml)):
-        value = node.value()
+        value = any_value(node)
     keys = {}
     if isinstance(schema, libyang.SList):
         for key in schema.keys():
             for child in children:
                 if child.schema().schema_path() == key.schema_path():
-                    keys[key.name()] = c2str(lib.lyd_get_value(child.cdata))
+                    keys[key.name()] = canonical_value(child)
     return {'id': node.path(), 'name': schema.name(), 'module': schema.module().name(),
             'namespace': namespace(schema.module()), 'schemaPath': schema.schema_path(),
             'instancePath': node.path(), 'kind': schema.keyword(), 'value': value,
@@ -31,8 +29,7 @@ def serialize_data(node):
 
 
 def parse_reply(context, raw_xml):
-    if context is None:
-        raise ValueError('No active schema context')
+    require_context(context)
     root = etree.fromstring(raw_xml.encode(), etree.XMLParser(resolve_entities=False, no_network=True))
     data = root.find(f'{{{NC}}}data')
     if data is None:

@@ -1,15 +1,9 @@
 """JSON DTOs from libyang's compiled schema, never its parsed source AST."""
 import libyang
-from libyang.util import c2str
+from .api import namespace, revision
 
 DATA_TYPES = (libyang.SNode.CONTAINER, libyang.SNode.LIST, libyang.SNode.LEAF,
               libyang.SNode.LEAFLIST, libyang.SNode.ANYDATA, libyang.SNode.ANYXML)
-
-
-def namespace(module):
-    # libyang-python 5.0.0 has no Module.namespace() wrapper. Isolate its
-    # documented CFFI struct access here; ns is the defining module namespace.
-    return c2str(module.cdata.ns)
 
 
 def serialize_node(node):
@@ -42,9 +36,9 @@ def serialize_context(context, *, implemented_names=None, loaded_names=None):
         # not advertise them. They must not become device data-tree roots.
         if loaded_names is not None:
             if module.name() in loaded_names:
-                modules.append({"name": module.name(), "revision": c2str(module.cdata.revision), "namespace": namespace(module)})
+                modules.append({"name": module.name(), "revision": revision(module), "namespace": namespace(module)})
         elif module.implemented():
-            modules.append({"name": module.name(), "revision": c2str(module.cdata.revision), "namespace": namespace(module)})
+            modules.append({"name": module.name(), "revision": revision(module), "namespace": namespace(module)})
         if module.implemented() and (implemented_names is None or module.name() in implemented_names):
             roots.extend(serialize_node(node) for node in module.children(types=DATA_TYPES))
             operations.extend(serialize_rpc(node) for node in module.children(types=(libyang.SNode.RPC,)))

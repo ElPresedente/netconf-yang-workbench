@@ -80,6 +80,87 @@ def test_invalid_yang_does_not_replace_working_tree(tmp_path):
     schema.clear()
 
 
+def test_device_yang_revision_uses_runtime_builtin_annotations(tmp_path):
+    from netconf_backend.yang.api import revision
+    with create_context() as ctx:
+        builtin_revision = revision(next(m for m in ctx if m.name() == 'yang'))
+    device_revision = '2000-01-01' if builtin_revision != '2000-01-01' else '2001-01-01'
+    sources = {
+        'yang': f'''module yang {{
+          namespace "urn:ietf:params:xml:ns:yang:1"; prefix yang;
+          revision {device_revision};
+        }}''',
+        'test-system': (FIXTURES / 'test-system.yang').read_text(),
+    }
+    session = Mock()
+    session.get_schema.side_effect = lambda name, rev: sources[name]
+    schema = SchemaContext()
+    try:
+        result = schema.compile(
+            [ModuleSpec('yang', device_revision), ModuleSpec('test-system', '2026-09-14')],
+            YangRepository('router', 830, tmp_path), session,
+        )
+        assert result['modulesDownloaded'] == 2
+        assert next(m for m in schema.modules if m['name'] == 'yang')['revision'] == builtin_revision
+        assert any(n['name'] == 'system' for n in schema.tree['roots'])
+        session.log.assert_called_once_with(
+            f"Using libyang's built-in yang@{builtin_revision} annotations; device advertises yang@{device_revision}",
+            level='warning',
+        )
+    finally:
+        schema.clear()
+
+
+def test_import_failure_keeps_previous_context_and_can_retry(tmp_path):
+    session = Mock()
+    session.get_schema.side_effect = lambda name, revision: (FIXTURES / f'{name}.yang').read_text()
+    schema = SchemaContext()
+    repo = YangRepository('router', 830, tmp_path)
+    schema.compile([ModuleSpec('test-system')], repo, session)
+    previous = schema.context
+    def download(name, revision):
+        if name == 'test-system':
+            raise BackendError('schema_download_failed', 'Import unavailable')
+        return (FIXTURES / f'{name}.yang').read_text()
+    session.get_schema.side_effect = download
+    with pytest.raises(BackendError) as exc:
+        schema.compile([ModuleSpec('test-augment')], repo, session)
+    assert exc.value.code == 'schema_download_failed'
+    assert schema.context is previous and previous.cdata is not None
+    # Failed native compilation must not leave a callback or damaged context.
+    assert previous.external_module_loader._module_data_clb is None
+    session.get_schema.side_effect = lambda name, revision: (FIXTURES / f'{name}.yang').read_text()
+    schema.compile([ModuleSpec('test-augment')], repo, session)
+    assert previous.cdata is None
+    schema.clear()
+    schema.clear()
+
+
+def test_submodule_loader_arguments_and_lifetime(tmp_path):
+    sources = {
+        'test-parent': '''module test-parent {
+          yang-version 1.1; namespace "urn:test:parent"; prefix p;
+          include test-child { revision-date 2026-11-13; }
+        }''',
+        'test-child': '''submodule test-child {
+          yang-version 1.1; belongs-to test-parent { prefix p; }
+          revision 2026-11-13;
+          container included { leaf value { type string; } }
+        }''',
+    }
+    session = Mock()
+    session.get_schema.side_effect = lambda name, revision: sources[name]
+    schema = SchemaContext()
+    try:
+        schema.compile([ModuleSpec('test-parent')], YangRepository('router', 830, tmp_path), session)
+        session.get_schema.assert_any_call('test-child', '2026-11-13')
+        assert schema.tree['roots'][0]['path'] == '/test-parent:included'
+        assert schema.context.external_module_loader._module_data_clb is None
+        assert schema.context.external_module_loader._cdata_modules == []
+    finally:
+        schema.clear()
+
+
 def test_repository_rejects_traversal():
     for name, revision in [("../oops", None), ("test", "../../x"), ("/tmp/x", None)]:
         with pytest.raises(BackendError): filename(name, revision)

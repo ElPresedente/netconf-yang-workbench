@@ -38,8 +38,6 @@ def invalid(message):
 
 
 def build_request(schema, params, capabilities):
-    if not schema.context:
-        invalid('Load YANG models first')
     if not isinstance(params, dict) or set(params) - {'operation', 'datastore', 'selectedPaths', 'listKeyValues', 'withDefaults'}:
         invalid('Unsupported request parameter')
     operation = params.get('operation')
@@ -59,17 +57,20 @@ def build_request(schema, params, capabilities):
             invalid('Unsupported with-defaults mode for this server')
     paths = params.get('selectedPaths')
     values = params.get('listKeyValues', {})
-    if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
-        invalid('Select at least one data node')
+    if not isinstance(paths, list) or any(not isinstance(p, str) for p in paths):
+        invalid('selectedPaths must be an array of schema paths')
     if not isinstance(values, dict):
         invalid('listKeyValues must be an object')
+    if paths and not schema.context:
+        invalid('Load YANG models first')
+    roots = schema.tree['roots'] if paths else []
     nodes, parents = {}, {}
     def index(node, parent=None):
         nodes[node['path']] = node
         parents[node['path']] = parent
         for child in node['children']:
             index(child, node['path'])
-    for root in schema.tree['roots']:
+    for root in roots:
         index(root)
     selected = set(paths)
     relevant = set()
@@ -106,7 +107,7 @@ def build_request(schema, params, capabilities):
     if operation == 'get-config':
         source = etree.SubElement(payload, f'{{{BASE}}}source')
         etree.SubElement(source, f'{{{BASE}}}{datastore}')
-    filter_node = etree.SubElement(payload, f'{{{BASE}}}filter', type='subtree')
+    filter_node = etree.SubElement(payload, f'{{{BASE}}}filter', type='subtree') if paths else None
     def emit(node, parent, entire=False):
         path = node['path']
         element = etree.SubElement(parent, f"{{{node['namespace']}}}{node['name']}", nsmap={None: node['namespace']})
@@ -129,7 +130,7 @@ def build_request(schema, params, capabilities):
                     invalid('Key value contains invalid XML characters')
             elif child['path'] in relevant or (full and (operation == 'get' or child['config'])):
                 emit(child, element, full)
-    for root in schema.tree['roots']:
+    for root in roots:
         if root['path'] in relevant:
             emit(root, filter_node)
     if with_defaults is not None:

@@ -3,6 +3,7 @@ import libyang
 from lxml import etree
 from .protocol.rpc import BackendError
 from .yang.data import serialize_data, NC
+from .yang.api import require_context
 
 VALIDATION = 'Local structure and scalar types checked with libyang. Datastore-dependent leafrefs, must/when and final validation are the server’s responsibility.'
 
@@ -12,7 +13,7 @@ def invalid(message):
 
 
 def build_rpc(schema, intent):
-    if schema.context is None:
+    if schema.context is None or schema.context.cdata is None:
         invalid('Load YANG models first')
     if not isinstance(intent, dict) or set(intent) - {'operation', 'nodes'}:
         invalid('Expected structured RPC input')
@@ -111,6 +112,7 @@ def build_rpc(schema, intent):
 
 def parse_rpc_reply(context, operation, raw_xml):
     """REPLY_YANG uses the operation element as context, never a data wrapper."""
+    require_context(context)
     reply = etree.fromstring(raw_xml.encode(), etree.XMLParser(resolve_entities=False, no_network=True))
     children = [c for c in reply if isinstance(c.tag, str)]
     if len(children) == 1 and children[0].tag == f'{{{NC}}}ok':

@@ -5,13 +5,13 @@ from typing import Callable
 
 from ncclient.devices.default import DefaultDeviceHandler
 from ncclient.manager import Manager
-from ncclient.transport import SSHSession
-from ncclient.transport.errors import AuthenticationError, SSHUnknownHostError
+from ncclient.transport.errors import AuthenticationError, SSHError, SSHUnknownHostError
 from ncclient.transport.session import SessionListener
 from ncclient.operations.rpc import RPCError, RaiseMode
 from lxml import etree
 
 from ..protocol.rpc import BackendError
+from .ssh import SSHSession
 
 BASE_11 = "urn:ietf:params:netconf:base:1.1"
 
@@ -91,6 +91,16 @@ class NetconfSession:
                 raise BackendError("authentication_failed", "SSH authentication failed") from None
             if isinstance(exc, SSHUnknownHostError):
                 raise BackendError("connection_failed", "SSH host key is unknown or changed; verify the device key in ~/.ssh/known_hosts") from None
+            if isinstance(exc, SSHError):
+                # Classify library messages, but never expose their contents:
+                # negotiation errors can include text supplied by the server.
+                reason = str(exc)
+                if reason.startswith("Could not open socket to "):
+                    raise BackendError("connection_failed", "Cannot reach SSH server; check host and port. For localhost, try 127.0.0.1 or ::1 and check the server is running") from None
+                if reason.startswith("Negotiation failed:"):
+                    raise BackendError("connection_failed", "SSH negotiation failed; check client/server algorithm compatibility and SSH server logs") from None
+                if reason == "Could not open connection, possibly due to unacceptable SSH subsystem name.":
+                    raise BackendError("connection_failed", "SSH server rejected the NETCONF subsystem; check that subsystem netconf is enabled for this user and port") from None
             # Do not echo library exception text: it could contain credentials.
             raise BackendError("connection_failed", f"Connection failed ({type(exc).__name__}); check host, port and SSH/NETCONF service") from None
 
@@ -161,7 +171,10 @@ class NetconfSession:
 
     def get_schema(self, name, revision=None):
         self.log(f"get-schema {name}@{revision or 'latest'}", direction="tx")
-        return self._rpc("get_schema", identifier=name, version=revision, format="yang").data
+        # The monitoring model defaults format to YANG. ncclient serializes an
+        # explicit format as unqualified text, which strict identityref parsers
+        # cannot resolve to the monitoring namespace.
+        return self._rpc("get_schema", identifier=name, version=revision).data
 
     def execute_request(self, operation, datastore, filter_node, preview, with_defaults=None):
         manager = self.require_connected()

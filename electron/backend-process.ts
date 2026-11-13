@@ -17,11 +17,13 @@ export class BackendProcess extends EventEmitter {
   private exited = false;
   status: BackendStatus = { ready: false };
 
-  start(root: string) {
+  start(root: string, resources?: string) {
+    const bundled = resources ? path.join(resources, 'backend', 'netconf-backend') : undefined;
     const local = path.join(root, 'backend', '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
-    const python = process.env.NETCONF_PYTHON || (existsSync(local) ? local : (process.platform === 'win32' ? 'python' : 'python3'));
-    const cwd = process.env.NETCONF_BACKEND_PATH || path.join(root, 'backend');
-    const child = this.child = spawn(python, ['-u', '-m', 'netconf_backend.main'], {
+    const useBundle = bundled !== undefined && !process.env.NETCONF_PYTHON;
+    const python = useBundle ? bundled : process.env.NETCONF_PYTHON || (existsSync(local) ? local : (process.platform === 'win32' ? 'python' : 'python3'));
+    const cwd = process.env.NETCONF_BACKEND_PATH || (useBundle ? path.dirname(bundled) : path.join(root, 'backend'));
+    const child = this.child = spawn(python, useBundle ? [] : ['-u', '-m', 'netconf_backend.main'], {
       cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     });

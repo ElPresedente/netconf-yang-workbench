@@ -100,7 +100,7 @@ def test_state_get_and_augment_namespace(schema):
 
 
 @pytest.mark.parametrize('patch', [
-    {'selectedPaths': ['/stale:path']}, {'selectedPaths': []}, {'selectedPaths': [4]},
+    {'selectedPaths': ['/stale:path']}, {'selectedPaths': None}, {'selectedPaths': [4]},
     {'operation': 'edit-config'}, {'datastore': 'running'}, {'namespace': 'fake'},
     {'listKeyValues': {LIST: {'mtu': '1500'}}}, {'listKeyValues': {LIST: {'name': 2}}},
     {'listKeyValues': {'/stale:list': {'name': 'x'}}}, {'listKeyValues': []},
@@ -109,6 +109,24 @@ def test_state_get_and_augment_namespace(schema):
 def test_invalid_intent(schema, patch):
     with pytest.raises(BackendError):
         build_request(schema, {**intent(LIST + '/mtu'), **patch}, [])
+
+
+@pytest.mark.parametrize('operation', ['get', 'get-config'])
+def test_unfiltered_without_schema(operation):
+    schema = SimpleNamespace(context=None)
+    params = intent(operation=operation, datastore='running' if operation == 'get-config' else None)
+    payload, subtree = build_request(schema, params, [])
+    assert subtree is None
+    assert payload.tag == f'{{{BASE}}}{operation}'
+    assert payload.find(f'{{{BASE}}}filter') is None
+    if operation == 'get-config':
+        assert payload.find(f'{{{BASE}}}source')[0].tag == f'{{{BASE}}}running'
+    else:
+        assert len(payload) == 0
+    with pytest.raises(BackendError, match='irrelevant list path'):
+        build_request(schema, {**params, 'listKeyValues': {LIST: {'name': 'eth0'}}}, [])
+    with pytest.raises(BackendError, match='Load YANG models first'):
+        build_request(schema, {**params, 'selectedPaths': [ROOT]}, [])
 
 
 @pytest.mark.parametrize('store', ['running', 'candidate', 'startup', 'unsupported'])
@@ -162,12 +180,13 @@ def test_with_defaults_capability(suffix, expected):
 
 @pytest.mark.parametrize('operation', ['get', 'get-config'])
 @pytest.mark.parametrize('mode', [None, 'explicit', 'trim', 'report-all', 'report-all-tagged'])
-def test_with_defaults_preview_and_execution(schema, operation, mode):
+@pytest.mark.parametrize('paths', [(ROOT,), ()])
+def test_with_defaults_preview_and_execution(schema, operation, mode, paths):
     caps = [WITH_DEFAULTS_CAP + '?basic-mode=explicit&also-supported=trim,report-all,report-all-tagged']
     session, transport, manager, factory, _ = setup_session(caps)
     session.connect(PARAMS)
     backend = Backend(session.emit, session=session, schema=schema)
-    params = {**intent(ROOT, operation=operation, datastore='running' if operation == 'get-config' else None), 'withDefaults': mode}
+    params = {**intent(*paths, operation=operation, datastore='running' if operation == 'get-config' else None), 'withDefaults': mode}
     method = manager.get if operation == 'get' else manager.get_config
     method.return_value.xml = f'<rpc-reply xmlns="{BASE}"><data/></rpc-reply>'
     before = manager.mock_calls[:]
@@ -180,9 +199,13 @@ def test_with_defaults_preview_and_execution(schema, operation, mode):
     else:
         assert wd.text == mode
         assert payload[-1] is wd
-        assert etree.QName(payload[-2]).localname == 'filter'
+        if paths:
+            assert etree.QName(payload[-2]).localname == 'filter'
     backend.dispatch('request.execute', params)
     assert method.call_args.kwargs['with_defaults'] == mode
+    if not paths:
+        assert payload.find(f'{{{BASE}}}filter') is None
+        assert method.call_args.kwargs['filter'] is None
     if operation == 'get-config':
         assert method.call_args.kwargs['source'] == 'running'
     assert session.require_connected() is manager

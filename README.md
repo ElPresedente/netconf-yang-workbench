@@ -14,19 +14,65 @@ A local Electron/React desktop NETCONF and YANG inspection tool. Electron owns a
 
 The desktop uses a workbench layout: compact connection and request toolbars, a dominant central tree, collapsible schema sidebar and inspector, and one full-width output dock. Drag the splitters to resize side panes and output height. **Preview**, **Response**, and **Session log** tabs share the dock; Execute activates Response. Collapse the dock for tree space, or use **Maximize / Restore** (also double-click the dock header) for large replies. Server capabilities remain available but are collapsed by default. The sidebar includes module revisions and a simple schema name/module filter.
 
-Sidebar/inspector visibility, splitter sizes, output collapse state and last output tab persist in renderer localStorage. No credentials or device data are saved there. Raw XML authoring, notifications, multiple simultaneous devices, cache-only loading and distributable packaging remain future work.
+Sidebar/inspector visibility, splitter sizes, output collapse state and last output tab persist in renderer localStorage. No credentials or device data are saved there. Raw XML authoring, notifications, multiple simultaneous devices and cache-only loading remain future work.
+
+## Linux AppImage
+
+Build on Linux x86_64 with Node.js 22.12+, npm and access to a Docker daemon:
+
+```sh
+npm ci
+npm run pack:appimage
+```
+
+The artifact is `release/netconf-client-0.1.0-x86_64.AppImage`. It includes Electron,
+the renderer, a frozen Python 3.12 backend, ncclient, Paramiko, cryptography,
+lxml, the libyang 6.4.13 shared library, libyang-python 5.0.0, the standard YANG
+modules, and native dependency libraries (including PCRE2, xxhash, GTK and NSS).
+The installed development virtualenv and the host's libyang are not used.
+Third-party notices and a desktop-library manifest are included under resources.
+
+The native backend and desktop libraries are built/exported in Ubuntu 24.04.
+The supported baseline is **Linux x86_64 with glibc 2.39 or newer**; glibc and
+its loader, the display server, graphics drivers, and desktop services remain
+host components. Older distributions need a build targeting their older glibc.
+Normal mounting needs FUSE 2; use extract-and-run where FUSE is unavailable:
+
+```sh
+chmod +x release/netconf-client-0.1.0-x86_64.AppImage
+release/netconf-client-0.1.0-x86_64.AppImage
+# Alternative without FUSE:
+release/netconf-client-0.1.0-x86_64.AppImage --appimage-extract-and-run
+```
+
+The packaging smoke test extracts the actual artifact into a temporary directory,
+compiles/parses a YANG model with the bundled backend, launches the packaged UI,
+checks loaded libyang/GTK paths, disconnected IPC state and backend shutdown:
+
+```sh
+xvfb-run -a npm run test:appimage
+```
+
+Its screenshot is `release/appimage-smoke.png`. The smoke test passes
+`--no-sandbox` for the automated temporary test instance. The generated AppImage
+launcher uses Chromium's sandbox when user namespaces are available and falls
+back to `--no-sandbox` if its user-namespace probe fails.
 
 ## Prerequisites
 
 - Node.js **22.12 or newer** and npm (the Electron installer requires this minimum).
 - Python **3.12+** with virtualenv support.
-- System **libyang 5**, its development headers, and its standard YANG modules.
+- System **libyang 6.4.13** (SO ABI 5), its development headers, and its standard YANG modules.
 - A C compiler, Python development headers, and libffi development headers for the Python binding.
 - Desktop libraries needed by Electron (GTK, NSS, etc. on Linux).
 
-This project pins `libyang` (the **libyang-python** package) to 5.0.0 and ncclient to 0.7.1. Paramiko is constrained below 5 because ncclient 0.7.1's host-key selection is incompatible with Paramiko 5 in the tested RSA-key path. Tested with Python 3.14, system libyang 5.8.6, and Paramiko 4.0.0.
+This project pins `libyang` (the **libyang-python** package) to 5.0.0 and ncclient to 0.7.1. Libyang's project version and SO ABI version differ: release 6.4.13 still uses ABI 5 and works with this Python binding. Paramiko is constrained below 5 because ncclient 0.7.1's host-key selection is incompatible with Paramiko 5 in the tested RSA-key path. Tested with Python 3.14, system libyang 6.4.13, and Paramiko 4.0.0. The [libyang API audit](docs/libyang-audit.md) records the checked calls and ownership rules.
 
-Install libyang through a package manager if it offers **major version 5** with headers and standard models, or follow the [upstream libyang build instructions](https://github.com/CESNET/libyang#building). Older distribution packages named `libyang2-dev` are not a substitute for this pinned binding. The [Python binding instructions](https://github.com/CESNET/libyang-python#installation) describe compiler/header settings for nonstandard prefixes. Check `pkg-config --modversion libyang` before installing Python dependencies.
+Install libyang 6.4.13 through a package manager with matching headers and standard models, or follow the [upstream libyang build instructions](https://github.com/CESNET/libyang#building). Older distribution packages named `libyang2-dev` are not a substitute for this pinned binding. The [Python binding instructions](https://github.com/CESNET/libyang-python#installation) describe compiler/header settings for nonstandard prefixes. Check `pkg-config --modversion libyang` before installing Python dependencies. Libyang 6 requires explicitly including the plugin header when building binding 5.0.0; use `LIBYANG_EXTRA_CFLAGS='-D_GNU_SOURCE -include libyang/plugins.h'` for pip installation. After replacing the native library or headers, rebuild the CFFI extension:
+
+```sh
+LIBYANG_EXTRA_CFLAGS='-D_GNU_SOURCE -include libyang/plugins.h' backend/.venv/bin/pip install --no-cache-dir --force-reinstall 'libyang==5.0.0'
+```
 
 On Windows, use a native Python/libyang toolchain compatible with the Electron process. Native Windows and macOS startup have not been verified; this milestone was developed and tested on Linux.
 
@@ -36,7 +82,7 @@ From the repository root:
 
 ```sh
 python3 -m venv backend/.venv
-backend/.venv/bin/python -m pip install -e './backend[test]'
+LIBYANG_EXTRA_CFLAGS='-D_GNU_SOURCE -include libyang/plugins.h' backend/.venv/bin/python -m pip install -e './backend[test]'
 npm install
 npm run dev
 ```

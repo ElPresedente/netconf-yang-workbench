@@ -1,0 +1,30 @@
+appId: org.netconf.client
+productName: NETCONF Client
+directories:
+  output: release
+  buildResources: packaging
+files:
+  - dist/electron/**
+  - dist/frontend/**
+  - package.json
+  - '!node_modules/**'
+extraResources:
+  - from: dist/packaging/backend
+    to: backend
+  - from: dist/packaging/linux-libs
+    to: linux-libs
+  - from: dist/packaging/third-party-notices
+    to: third-party-notices
+  - from: dist/packaging/native-libraries.json
+    to: native-libraries.json
+afterPack: ./packaging/after-pack.cjs
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  executableName: netconf-client
+  category: Network
+  artifactName: netconf-client-${version}-${arch}.${ext}
+appImage:
+  executableArgs: []
+publish: null

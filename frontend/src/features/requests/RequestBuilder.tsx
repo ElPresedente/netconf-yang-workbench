@@ -28,7 +28,7 @@ export function RequestBuilder({ inactive, candidateModified, onCandidateAttempt
   useEffect(() => {
     let alive = true;
     setPreview(null); setError('');
-    if (!roots.length || !count) return;
+    if ((editMode || count > 0) && (!roots.length || !count)) return;
     const timer = setTimeout(() => {
       void (editMode ? api.previewEdit(draft) : api.previewRequest(intent)).then(result => {
         if (!alive) return;
@@ -68,7 +68,7 @@ export function RequestBuilder({ inactive, candidateModified, onCandidateAttempt
         {!!editCaps.supportedTestOptions.length && <label>Test option<select aria-label="Test option" disabled={busy} value={draft.testOption || ''} onChange={e => setDraft({ ...draft, testOption: (e.target.value || null) as EditIntent['testOption'] })}><option value="">Server/RFC default</option>{editCaps.supportedTestOptions.map(v => <option key={v}>{v}</option>)}</select></label>}
         <label>Error option<select aria-label="Error option" disabled={busy} value={draft.errorOption || ''} onChange={e => setDraft({ ...draft, errorOption: (e.target.value || null) as EditIntent['errorOption'] })}><option value="">Server/RFC default</option>{['stop-on-error', 'continue-on-error', ...(editCaps.supportsRollbackOnError ? ['rollback-on-error'] : [])].map(v => <option key={v}>{v}</option>)}</select></label>
       </>}
-      <button disabled={busy || info.state !== 'connected' || !preview || preview.intent !== activeIntent || !roots.length} onClick={() => void run(async () => { onExecute?.(); setResponse(null); setExecutionError(''); setNotice('');
+      <button disabled={busy || info.state !== 'connected' || !preview || preview.intent !== activeIntent || ((editMode || count > 0) && !roots.length)} onClick={() => void run(async () => { onExecute?.(); setResponse(null); setExecutionError(''); setNotice('');
         try {
           const result = unwrap(await (editMode ? api.executeEdit(draft) : api.executeRequest(intent)));
           setResponse(result);
@@ -79,7 +79,7 @@ export function RequestBuilder({ inactive, candidateModified, onCandidateAttempt
         }
         catch (e) { if (editMode) onEditAttempt(draft, false); setExecutionError(e instanceof Error ? e.message : 'Request failed'); throw e; } })}>Execute</button>
       {!editMode && <><button disabled={busy || !intent.selectedPaths.length} onClick={() => setIntent({ ...intent, selectedPaths: [], listKeyValues: {} })}>Clear selection</button>
-      <span>{intent.selectedPaths.length} explicit selections · empty keys match all entries</span></>}
+      <span>{intent.selectedPaths.length ? `${intent.selectedPaths.length} explicit selections · empty keys match all entries` : intent.operation === 'get' ? 'No filter · retrieve all configuration and state data' : 'No filter · retrieve all configuration'}</span></>}
       {editMode && <button disabled={busy || !(hasDraft ?? draft.changes.length)} onClick={() => clearDraft?.()}>Clear draft</button>}
       {editMode && draft.target === 'candidate' && info.state === 'connected' && editCaps.editableTargets.includes('candidate') && <>
         <button disabled={busy} title="Apply the device's candidate configuration to running" onClick={() => candidateAction('commit')}>Commit</button>
@@ -91,7 +91,7 @@ export function RequestBuilder({ inactive, candidateModified, onCandidateAttempt
   return <>
     {!inactive && (editMode && editToolbarTarget ? createPortal(controls, editToolbarTarget) : controls)}
     {!inactive && !editMode && <div className="key-fields">{relevantLists(roots, intent.selectedPaths).map(list => <fieldset key={list.path} disabled={busy}><legend title={list.path}>{list.name} keys <code>{list.path}</code></legend>{list.keys.map(key => <label key={key}>{key}<input aria-label={`${list.path} key ${key}`} value={intent.listKeyValues[list.path]?.[key] || ''} onChange={e => setIntent({ ...intent, listKeyValues: { ...intent.listKeyValues, [list.path]: { ...intent.listKeyValues[list.path], [key]: e.target.value } } })} /></label>)}</fieldset>)}</div>}
-    {output(<section className="pane preview"><h2>Request preview</h2><div className="scroll">{error ? <p role="alert" className="error">{error}</p> : <pre>{preview?.intent === activeIntent ? preview.xml : count ? 'Preparing preview…' : editMode ? hasDraft ? 'Edit a value or choose a node operation to include it in the payload.' : 'Add configuration to the Edit draft tree to preview edit-config.' : 'Check schema nodes to build a subtree filter.'}</pre>}</div></section>, previewTarget)}
+    {output(<section className="pane preview"><h2>Request preview</h2><div className="scroll">{error ? <p role="alert" className="error">{error}</p> : <pre>{preview?.intent === activeIntent ? preview.xml : count || !editMode ? 'Preparing preview…' : hasDraft ? 'Edit a value or choose a node operation to include it in the payload.' : 'Add configuration to the Edit draft tree to preview edit-config.'}</pre>}</div></section>, previewTarget)}
     {output(<section className="pane response"><h2>Response</h2><div className="scroll">{notice && <p role="status">{notice}</p>}{executionError && <p className="error" role="alert">{executionError}</p>}{response?.parseWarning && <p className="error" role="alert">{response.parseWarning}</p>}{response?.errors.map((error, i) => <div role="alert" className="error" key={i}>{Object.entries(error).map(([key, value]) => <div key={key}><b>{key}</b>: {value}</div>)}</div>)}<pre>{response?.rawXml || 'No request executed.'}</pre></div></section>, responseTarget)}
   </>;
 }
