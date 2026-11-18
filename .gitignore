@@ -1,6 +1,7 @@
 # Node.js / Electron / Vite
 node_modules/
 /dist/
+/release/
 *.tsbuildinfo
 .vite/
 

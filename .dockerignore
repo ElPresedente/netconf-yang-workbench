@@ -1,0 +1,8 @@
+*
+!backend
+!backend/pyproject.toml
+!backend/netconf_backend
+!backend/netconf_backend/**
+!packaging
+!packaging/**
+**/__pycache__
